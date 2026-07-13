@@ -1,7 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:strawberry/core/supabase_config.dart';
 import 'package:strawberry/features/splash/splash_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp();
+
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    // ignore: deprecated_member_use
+    anonKey: SupabaseConfig.anonKey,
+  );
+
   runApp(const MyApp());
 }
 
@@ -19,4 +32,3 @@ class MyApp extends StatelessWidget {
     );
   }
 }
-
