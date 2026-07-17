@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
 import 'dart:async';
@@ -6,43 +7,41 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email', 'profile'],
+  );
   final SupabaseClient _supabaseClient = Supabase.instance.client;
 
-  // Sends OTP to the provided phone number using Firebase
-  Future<void> sendOTP({
-    required String phone,
-    required void Function(String verificationId) onCodeSent,
-    required void Function(String errorMessage) onError,
-  }) async {
-    await _firebaseAuth.verifyPhoneNumber(
-      phoneNumber: phone,
-      verificationCompleted: (PhoneAuthCredential credential) async {
-        try {
-          await _firebaseAuth.signInWithCredential(credential);
-        } catch (e) {
-          onError(e.toString());
-        }
-      },
-      verificationFailed: (FirebaseAuthException e) {
-        onError(e.message ?? 'Verification failed');
-      },
-      codeSent: (String verificationId, int? resendToken) {
-        onCodeSent(verificationId);
-      },
-      codeAutoRetrievalTimeout: (String verificationId) {},
-    );
-  }
+  // Sign in with Google — native Android account picker (no Chrome redirect)
+  Future<UserCredential?> signInWithGoogle() async {
+    try {
+      // Trigger native Google Sign-In account picker
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        // User cancelled the sign-in
+        return null;
+      }
 
-  // Verifies the OTP and logs the user into Firebase
-  Future<UserCredential> verifyOTP({
-    required String verificationId,
-    required String smsCode,
-  }) async {
-    final PhoneAuthCredential credential = PhoneAuthProvider.credential(
-      verificationId: verificationId,
-      smsCode: smsCode,
-    );
-    return await _firebaseAuth.signInWithCredential(credential);
+      // Get authentication tokens
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      // Create Firebase credential from Google tokens
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // Sign in to Firebase with the Google credential
+      return await _firebaseAuth.signInWithCredential(credential);
+    } on Exception catch (e) {
+      final msg = e.toString().toLowerCase();
+      // Silently handle user cancellation
+      if (msg.contains('cancel') || msg.contains('sign_in_canceled')) {
+        return null;
+      }
+      rethrow;
+    }
   }
 
   // Checks if a user is currently logged in via Firebase
@@ -53,11 +52,18 @@ class AuthService {
   // Get current user ID (Firebase UID string)
   String? get currentUserId => _firebaseAuth.currentUser?.uid;
 
-  // Get current user Phone
-  String? get currentUserPhone => _firebaseAuth.currentUser?.phoneNumber;
+  // Get current user display name from Google
+  String? get currentUserDisplayName => _firebaseAuth.currentUser?.displayName;
 
-  // Log out of Firebase session
+  // Get current user email
+  String? get currentUserEmail => _firebaseAuth.currentUser?.email;
+
+  // Get current user photo URL
+  String? get currentUserPhotoUrl => _firebaseAuth.currentUser?.photoURL;
+
+  // Log out of Firebase and Google session
   Future<void> logout() async {
+    await _googleSignIn.signOut(); // clears Google session so picker shows next time
     await _firebaseAuth.signOut();
   }
 
@@ -78,13 +84,13 @@ class AuthService {
     }
   }
 
-  // Check if a phone number is pre-authorized as admin in Supabase
-  Future<bool> isPhoneAuthorizedAdmin(String phone) async {
+  // Check if an email is pre-authorized as admin in Supabase
+  Future<bool> isEmailAuthorizedAdmin(String email) async {
     try {
       final response = await _supabaseClient
           .from('allowed_admins')
-          .select('phone')
-          .eq('phone', phone)
+          .select('email')
+          .eq('email', email)
           .maybeSingle();
       return response != null;
     } catch (e) {
@@ -93,18 +99,23 @@ class AuthService {
   }
 
   // Create a profile for the current Firebase user in Supabase
-  Future<Map<String, dynamic>> createProfile(String name) async {
+  // Name is automatically taken from the Google account (displayName)
+  Future<Map<String, dynamic>> createProfile() async {
     final userId = currentUserId;
-    final phone = currentUserPhone;
-    if (userId == null || phone == null) {
+    final name = currentUserDisplayName ?? 'User';
+    final email = currentUserEmail ?? '';
+    final photoUrl = currentUserPhotoUrl;
+
+    if (userId == null) {
       throw Exception('User is not logged in');
     }
 
-    final isAdmin = await isPhoneAuthorizedAdmin(phone);
+    final isAdmin = await isEmailAuthorizedAdmin(email);
     final profileData = {
       'id': userId, // Firebase UID
-      'phone': phone,
+      'email': email,
       'name': name,
+      'photo_url': photoUrl,
       'role': isAdmin ? 'admin' : 'student',
       'status': isAdmin ? 'approved' : 'pending',
       'student_type': isAdmin ? 'Admin' : null,
@@ -133,17 +144,17 @@ class AuthService {
         .eq('id', uid);
   }
 
-  // Add a phone number to allowed_admins (Admins only)
-  Future<void> addAdmin(String phone) async {
+  // Add an email to allowed_admins (Admins only)
+  Future<void> addAdmin(String email) async {
     // 1. Add to allowed_admins
-    await _supabaseClient.from('allowed_admins').insert({'phone': phone});
+    await _supabaseClient.from('allowed_admins').insert({'email': email});
 
     // 2. If the user already has a profile, upgrade their role to admin and approve them
     try {
       await _supabaseClient
           .from('profiles')
           .update({'role': 'admin', 'status': 'approved'})
-          .eq('phone', phone);
+          .eq('email', email);
     } catch (e) {
       // Profile might not exist yet, which is fine
     }
@@ -153,12 +164,13 @@ class AuthService {
   Future<List<String>> getAllowedAdmins() async {
     final response = await _supabaseClient
         .from('allowed_admins')
-        .select('phone');
+        .select('email');
     return List<String>.from(
-      (response as List).map((e) => e['phone'] as String),
+      (response as List).map((e) => e['email'] as String),
     );
   }
-  // ----- New Methods -----
+
+  // ----- Attendance Methods -----
 
   // Fetch attendance records for a student between dates
   Future<List<Map<String, dynamic>>> getStudentAttendance(
@@ -209,6 +221,8 @@ class AuthService {
         .eq('status', 'approved');
     return List<Map<String, dynamic>>.from(response as List);
   }
+
+  // ----- Notice Methods -----
 
   // Fetch notices for a particular audience (All or specific type)
   Future<List<Map<String, dynamic>>> getNotices({
@@ -270,6 +284,8 @@ class AuthService {
   Future<void> deleteNotice(int id) async {
     await _supabaseClient.from('notices').delete().eq('id', id);
   }
+
+  // ----- Gallery Methods -----
 
   // Upload gallery images (compress to <=450KB) and store URLs
   Future<List<String>> uploadGalleryImages(List<File> files) async {
@@ -359,6 +375,8 @@ class AuthService {
     }
   }
 
+  // ----- Chat Methods -----
+
   // Send a chat message
   Future<void> sendMessage(
     String senderId,
@@ -377,9 +395,9 @@ class AuthService {
   // Uses Realtime channel subscription + initial fetch for reliability
   Stream<List<Map<String, dynamic>>> getChatStream(String studentId) {
     final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
-    List<Map<String, dynamic>> _messages = [];
+    List<Map<String, dynamic>> messages = [];
 
-    bool _isMessageForThisChat(Map<String, dynamic> m) {
+    bool isMessageForThisChat(Map<String, dynamic> m) {
       final sender = (m['sender_id'] ?? '') as String;
       final receiver = (m['receiver_id'] ?? '') as String;
       return (sender == studentId && receiver == 'admin') ||
@@ -394,8 +412,8 @@ class AuthService {
             .select()
             .or('and(sender_id.eq.$studentId,receiver_id.eq.admin),and(sender_id.eq.admin,receiver_id.eq.$studentId)')
             .order('created_at', ascending: true);
-        _messages = List<Map<String, dynamic>>.from(data);
-        if (!controller.isClosed) controller.add(List.from(_messages));
+        messages = List<Map<String, dynamic>>.from(data);
+        if (!controller.isClosed) controller.add(List.from(messages));
       } catch (e) {
         print('ChatStream fetchInitial error: $e');
       }
@@ -414,15 +432,15 @@ class AuthService {
           table: 'messages',
           callback: (payload) {
             final newRow = payload.newRecord;
-            if (_isMessageForThisChat(newRow)) {
-              _messages.add(Map<String, dynamic>.from(newRow));
+            if (isMessageForThisChat(newRow)) {
+              messages.add(Map<String, dynamic>.from(newRow));
               // Sort by created_at to ensure correct order
-              _messages.sort((a, b) {
+              messages.sort((a, b) {
                 final ta = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
                 final tb = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
                 return ta.compareTo(tb);
               });
-              if (!controller.isClosed) controller.add(List.from(_messages));
+              if (!controller.isClosed) controller.add(List.from(messages));
             }
           },
         )
@@ -458,7 +476,7 @@ class AuthService {
     // Get profiles details for these student IDs
     final profilesResponse = await _supabaseClient
         .from('profiles')
-        .select('id, name, phone, student_type')
+        .select('id, name, email, student_type')
         .inFilter('id', studentIds.toList());
 
     return List<Map<String, dynamic>>.from(profilesResponse as List);

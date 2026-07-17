@@ -66,5 +66,20 @@
       <string>UIInterfaceOrientationLandscapeLeft</string>
       <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+
+    <!-- Google Sign-in ke liye niche ka part add kiya hai -->
+    <key>CFBundleURLTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <!-- WARNING: YAHAN APNA REAL REVERSED_CLIENT_ID PASTE KAREIN -->
+          <string>com.googleusercontent.apps.246316625668-4smagpdr0mabh6nnrpm5oto6lbee1tb9</string>
+        </array>
+      </dict>
+    </array>
+    
   </dict>
 </plist>

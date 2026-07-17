@@ -12,7 +12,20 @@
           "package_name": "com.harshit.strawberry"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "246316625668-vmvh2nmoshg33mq3mt0901a2ibo8futi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.harshit.strawberry",
+            "certificate_hash": "2d37a3fbb5ba9ba2d796688f81e3b5e4e67bd2cf"
+          }
+        },
+        {
+          "client_id": "246316625668-m9fe5m33tjhhril3cpv2uhempcsai3ot.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCb-CwE-hMPQ6Ofbq9Ag0im719tc_7Z2u4"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "246316625668-m9fe5m33tjhhril3cpv2uhempcsai3ot.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "246316625668-4smagpdr0mabh6nnrpm5oto6lbee1tb9.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.harshit.strawberry"
+              }
+            }
+          ]
         }
       }
     }

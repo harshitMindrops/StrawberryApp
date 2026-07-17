@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:strawberry/features/auth/auth_screen.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
-import 'package:strawberry/features/auth/enter_name_screen.dart';
 import 'package:strawberry/features/dashboard/student/home_screen.dart';
 import 'package:strawberry/features/dashboard/student/wait_screen.dart';
 import 'package:strawberry/features/dashboard/admin/admin_dashboard.dart';
@@ -31,7 +30,6 @@ class _SplashScreenState extends State<SplashScreen>
   static const Color _leafGreen = Color(0xFF5FAD6B);
   static const Color _bgTop = Color(0xFFFFFFFF);
   static const Color _bgBottom = Color(0xFFFFF5F6);
-  static const Color _textDark = Color(0xFF2D2D2D);
   static const Color _textMuted = Color(0xFF9B9B9B);
 
   @override
@@ -40,7 +38,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     _entranceController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1100),
+      duration: const Duration(milliseconds: 700),
     );
 
     _logoScale = Tween<double>(begin: 0.6, end: 1.0).animate(
@@ -57,15 +55,13 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
 
-    _textSlide = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _entranceController,
-        curve: const Interval(0.35, 0.85, curve: Curves.easeOutCubic),
-      ),
-    );
+    _textSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: const Interval(0.35, 0.85, curve: Curves.easeOutCubic),
+          ),
+        );
 
     _textOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
@@ -101,56 +97,53 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
 
     if (!loggedIn) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AuthScreen()),
-      );
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const AuthScreen()));
       return;
     }
 
     try {
-      final profile = await authService.getCurrentProfile();
+      Map<String, dynamic>? profile = await authService.getCurrentProfile();
 
       if (!mounted) return;
 
-      if (profile == null ||
-          profile['name'] == null ||
-          (profile['name'] as String).trim().isEmpty) {
-        // Logged in but profile details are not fully filled
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const EnterNameScreen()),
-        );
-      } else {
-        final role = profile['role'];
-        final status = profile['status'];
+      if (profile == null) {
+        // Logged in but no profile yet — create one using Google info automatically
+        profile = await authService.createProfile();
+        if (!mounted) return;
+      }
 
-        if (status == 'pending') {
+      final role = profile['role'];
+      final status = profile['status'];
+
+      if (status == 'pending') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const WaitScreen()),
+        );
+      } else if (status == 'approved') {
+        if (role == 'admin') {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const WaitScreen()),
+            MaterialPageRoute(builder: (_) => const AdminDashboard()),
           );
-        } else if (status == 'approved') {
-          if (role == 'admin') {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const AdminDashboard()),
-            );
-          } else {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
-            );
-          }
         } else {
-          // If rejected or any other status, force logout and return to auth screen
-          await authService.logout();
-          if (!mounted) return;
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const AuthScreen()),
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
           );
         }
+      } else {
+        // If rejected or any other status, force logout and return to auth screen
+        await authService.logout();
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AuthScreen()),
+        );
       }
     } catch (e) {
       // In case of error, fall back to AuthScreen
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AuthScreen()),
-      );
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const AuthScreen()));
     }
   }
 
@@ -175,17 +168,17 @@ class _SplashScreenState extends State<SplashScreen>
             Positioned(
               top: -60,
               right: -60,
-              child: _blob(180, _accent.withOpacity(0.18)),
+              child: _blob(180, _accent.withValues(alpha: 0.18)),
             ),
             Positioned(
               bottom: -80,
               left: -60,
-              child: _blob(220, _primary.withOpacity(0.08)),
+              child: _blob(220, _primary.withValues(alpha: 0.08)),
             ),
             Positioned(
               top: size.height * 0.15,
               left: -40,
-              child: _blob(90, _leafGreen.withOpacity(0.10)),
+              child: _blob(90, _leafGreen.withValues(alpha: 0.10)),
             ),
 
             // Main content
@@ -262,8 +255,10 @@ class _SplashScreenState extends State<SplashScreen>
                         return Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: List.generate(3, (i) {
-                            final t = (_pulseController.value - i * 0.2)
-                                .clamp(0.0, 1.0);
+                            final t = (_pulseController.value - i * 0.2).clamp(
+                              0.0,
+                              1.0,
+                            );
                             final scale =
                                 0.6 + 0.4 * math.sin(t * math.pi).abs();
                             return Padding(
@@ -277,11 +272,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   height: 9,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: Color.lerp(
-                                      _accent,
-                                      _primary,
-                                      scale,
-                                    ),
+                                    color: Color.lerp(_accent, _primary, scale),
                                   ),
                                 ),
                               ),
@@ -309,7 +300,7 @@ class _SplashScreenState extends State<SplashScreen>
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1.8,
-                    color: _textMuted.withOpacity(0.7),
+                    color: _textMuted.withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -357,7 +348,7 @@ class _StrawberryLogo extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withOpacity(0.25),
+            color: primary.withValues(alpha: 0.25),
             blurRadius: 30,
             spreadRadius: 2,
             offset: const Offset(0, 12),
@@ -370,12 +361,7 @@ class _StrawberryLogo extends StatelessWidget {
           ),
         ],
       ),
-      child: ClipOval(
-        child: Image.asset(
-          'assets/images/logo.png',
-          fit: BoxFit.contain,
-        ),
-      ),
+      child: Image.asset('assets/images/logo.png', fit: BoxFit.contain),
     );
   }
 }
