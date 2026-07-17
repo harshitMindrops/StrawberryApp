@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import 'package:strawberry/features/auth/auth_screen.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
 import 'package:strawberry/features/auth/enter_name_screen.dart';
@@ -13,11 +14,80 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _entranceController;
+  late final Animation<double> _logoScale;
+  late final Animation<double> _logoOpacity;
+  late final Animation<Offset> _textSlide;
+  late final Animation<double> _textOpacity;
+
+  late final AnimationController _pulseController;
+
+  // Strawberry brand palette
+  static const Color _primary = Color(0xFFE94464); // strawberry red-pink
+  static const Color _primaryDark = Color(0xFFD32F52);
+  static const Color _accent = Color(0xFFFFB4A2); // soft peach
+  static const Color _leafGreen = Color(0xFF5FAD6B);
+  static const Color _bgTop = Color(0xFFFFFFFF);
+  static const Color _bgBottom = Color(0xFFFFF5F6);
+  static const Color _textDark = Color(0xFF2D2D2D);
+  static const Color _textMuted = Color(0xFF9B9B9B);
+
   @override
   void initState() {
     super.initState();
+
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+
+    _logoScale = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.0, 0.65, curve: Curves.elasticOut),
+      ),
+    );
+
+    _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
+      ),
+    );
+
+    _textSlide = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.35, 0.85, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    _textOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.35, 0.85, curve: Curves.easeOut),
+      ),
+    );
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+
+    _entranceController.forward();
     _navigateAfterDelay();
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    _pulseController.dispose();
+    super.dispose();
   }
 
   Future<void> _navigateAfterDelay() async {
@@ -42,7 +112,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
       if (!mounted) return;
 
-      if (profile == null || profile['name'] == null || (profile['name'] as String).trim().isEmpty) {
+      if (profile == null ||
+          profile['name'] == null ||
+          (profile['name'] as String).trim().isEmpty) {
         // Logged in but profile details are not fully filled
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const EnterNameScreen()),
@@ -84,23 +156,226 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    final size = MediaQuery.of(context).size;
+
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [_bgTop, _bgBottom],
+          ),
+        ),
+        child: Stack(
           children: [
-            Text(
-              'Welcome to Strawberry',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            // Soft decorative blobs for premium feel
+            Positioned(
+              top: -60,
+              right: -60,
+              child: _blob(180, _accent.withOpacity(0.18)),
             ),
-            SizedBox(height: 20),
-            CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text('Loading...'),
+            Positioned(
+              bottom: -80,
+              left: -60,
+              child: _blob(220, _primary.withOpacity(0.08)),
+            ),
+            Positioned(
+              top: size.height * 0.15,
+              left: -40,
+              child: _blob(90, _leafGreen.withOpacity(0.10)),
+            ),
+
+            // Main content
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Animated logo
+                  AnimatedBuilder(
+                    animation: _entranceController,
+                    builder: (context, child) {
+                      return Opacity(
+                        opacity: _logoOpacity.value,
+                        child: Transform.scale(
+                          scale: _logoScale.value,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _StrawberryLogo(
+                      primary: _primary,
+                      primaryDark: _primaryDark,
+                      leafGreen: _leafGreen,
+                    ),
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  // App name + tagline
+                  SlideTransition(
+                    position: _textSlide,
+                    child: FadeTransition(
+                      opacity: _textOpacity,
+                      child: Column(
+                        children: [
+                          ShaderMask(
+                            shaderCallback: (bounds) => const LinearGradient(
+                              colors: [_primary, _primaryDark],
+                            ).createShader(bounds),
+                            child: const Text(
+                              'Strawberry',
+                              style: TextStyle(
+                                fontSize: 34,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                                color: Colors.white,
+                                height: 1.1,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Little steps, big adventures',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                              color: _textMuted,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 56),
+
+                  // Custom pulsing loader
+                  FadeTransition(
+                    opacity: _textOpacity,
+                    child: AnimatedBuilder(
+                      animation: _pulseController,
+                      builder: (context, _) {
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(3, (i) {
+                            final t = (_pulseController.value - i * 0.2)
+                                .clamp(0.0, 1.0);
+                            final scale =
+                                0.6 + 0.4 * math.sin(t * math.pi).abs();
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                              ),
+                              child: Transform.scale(
+                                scale: scale,
+                                child: Container(
+                                  width: 9,
+                                  height: 9,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Color.lerp(
+                                      _accent,
+                                      _primary,
+                                      scale,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Bottom branding
+            Positioned(
+              bottom: 40,
+              left: 0,
+              right: 0,
+              child: FadeTransition(
+                opacity: _textOpacity,
+                child: Text(
+                  'Preschool & Daycare',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.8,
+                    color: _textMuted.withOpacity(0.7),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+
+  Widget _blob(double size, Color color) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    );
+  }
 }
 
+/// Logo mark — uses your actual logo.png asset with a soft
+/// premium container (shadow + subtle gradient backdrop).
+class _StrawberryLogo extends StatelessWidget {
+  final Color primary;
+  final Color primaryDark;
+  final Color leafGreen;
+
+  const _StrawberryLogo({
+    required this.primary,
+    required this.primaryDark,
+    required this.leafGreen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 116,
+      height: 116,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white, Color(0xFFFFF0F1)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: primary.withOpacity(0.25),
+            blurRadius: 30,
+            spreadRadius: 2,
+            offset: const Offset(0, 12),
+          ),
+          const BoxShadow(
+            color: Colors.white,
+            blurRadius: 10,
+            spreadRadius: -4,
+            offset: Offset(-4, -4),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/logo.png',
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+}

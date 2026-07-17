@@ -2,10 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
 import 'package:intl/intl.dart';
 
+/// ---------------------------------------------------------------------
+/// Design tokens — kept consistent with admin_dashboard.dart
+/// ---------------------------------------------------------------------
+class _Palette {
+  static const primary = Color(0xFFE94464);
+  static const primaryDark = Color(0xFFD32F52);
+  static const primarySoft = Color(0xFFFFE7EC);
+
+  static const bg = Color(0xFFFBF9FA);
+  static const surface = Colors.white;
+  static const border = Color(0xFFF1E4E7);
+
+  static const textDark = Color(0xFF2B2730);
+  static const textMuted = Color(0xFF8F8A93);
+  static const textFaint = Color(0xFFB9B3BB);
+
+  static const success = Color(0xFF3FAE5C);
+  static const successSoft = Color(0xFFE4F6E8);
+  static const danger = Color(0xFFE2504A);
+  static const dangerSoft = Color(0xFFFBE7E6);
+  static const amber = Color(0xFFE9A23B);
+  static const amberSoft = Color(0xFFFCF0DD);
+}
+
 class AttendanceMarkPage extends StatefulWidget {
   final AuthService authService;
   const AttendanceMarkPage({Key? key, required this.authService})
-    : super(key: key);
+      : super(key: key);
 
   @override
   State<AttendanceMarkPage> createState() => _AttendanceMarkPageState();
@@ -16,6 +40,7 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
   List<Map<String, dynamic>> _students = [];
   Map<String, String> _attendanceStatus = {};
   bool _loading = true;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -43,6 +68,18 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       initialDate: now,
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 1),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: _Palette.primary,
+              onPrimary: Colors.white,
+              onSurface: _Palette.textDark,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) {
       setState(() => _selectedDate = picked);
@@ -52,13 +89,11 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
   Future<void> _saveAttendance() async {
     if (_selectedDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Select a date first'),
-          backgroundColor: Colors.redAccent,
-        ),
+        _snack('Select a date first', success: false),
       );
       return;
     }
+    setState(() => _saving = true);
     final entries = _students
         .map(
           (s) => {
@@ -68,122 +103,381 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
         )
         .toList();
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-    await widget.authService.markAttendance(dateStr, entries);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Attendance saved'),
-        backgroundColor: Colors.green,
-      ),
+    try {
+      await widget.authService.markAttendance(dateStr, entries);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        _snack('Attendance saved', success: true),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  SnackBar _snack(String message, {required bool success}) {
+    return SnackBar(
+      content: Text(message, style: const TextStyle(fontWeight: FontWeight.w600)),
+      backgroundColor: success ? _Palette.success : _Palette.danger,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
     );
+  }
+
+  ({int present, int absent, int late}) get _counts {
+    int present = 0, absent = 0, late = 0;
+    for (final s in _attendanceStatus.values) {
+      if (s == 'Present') present++;
+      if (s == 'Absent') absent++;
+      if (s == 'Late') late++;
+    }
+    return (present: present, absent: absent, late: late);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: _Palette.bg,
       appBar: AppBar(
         title: const Text(
           'Mark Attendance',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: _Palette.textDark, fontWeight: FontWeight.w800, fontSize: 19),
         ),
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: _Palette.surface,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: _Palette.textDark,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        shape: const Border(bottom: BorderSide(color: _Palette.border, width: 1)),
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF4E7E)),
-            )
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _pickDate,
-                    icon: const Icon(Icons.calendar_today),
-                    label: Text(
-                      _selectedDate == null
-                          ? 'Select Date'
-                          : DateFormat('dd MMM yyyy').format(_selectedDate!),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF4E7E),
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: _students.length,
-                      itemBuilder: (context, index) {
-                        final student = _students[index];
-                        final id = student['id'] as String;
-                        final name = student['name'] as String? ?? 'Student';
-                        final type =
-                            student['student_type'] as String? ?? 'Unknown';
-                        return Card(
-                          color: const Color(0xFF1E1E2C),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+          ? const Center(child: CircularProgressIndicator(color: _Palette.primary))
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Date picker button
+                      InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: _pickDate,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                          decoration: BoxDecoration(
+                            color: _Palette.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: _Palette.border),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.03),
+                                blurRadius: 14,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
                           ),
-                          child: ListTile(
-                            title: Text(
-                              name,
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            subtitle: Text(
-                              'Type: $type',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.6),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _Palette.primarySoft,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.calendar_today_rounded,
+                                    color: _Palette.primary, size: 18),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Attendance Date',
+                                        style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: _Palette.textMuted,
+                                            fontWeight: FontWeight.w600)),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _selectedDate == null
+                                          ? 'Select a date'
+                                          : DateFormat('dd MMM yyyy').format(_selectedDate!),
+                                      style: const TextStyle(
+                                        fontSize: 15.5,
+                                        color: _Palette.textDark,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded, color: _Palette.textFaint),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Quick summary row
+                      if (_students.isNotEmpty)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _CountChip(
+                                label: 'Present',
+                                count: _counts.present,
+                                color: _Palette.success,
+                                bg: _Palette.successSoft,
                               ),
                             ),
-                            trailing: DropdownButton<String>(
-                              value: _attendanceStatus[id],
-                              dropdownColor: const Color(0xFF1E1E2C),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'Present',
-                                  child: Text(
-                                    'Present',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'Absent',
-                                  child: Text(
-                                    'Absent',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'Late',
-                                  child: Text(
-                                    'Late',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                              ],
-                              onChanged: (val) =>
-                                  setState(() => _attendanceStatus[id] = val!),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _CountChip(
+                                label: 'Absent',
+                                count: _counts.absent,
+                                color: _Palette.danger,
+                                bg: _Palette.dangerSoft,
+                              ),
                             ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _CountChip(
+                                label: 'Late',
+                                count: _counts.late,
+                                color: _Palette.amber,
+                                bg: _Palette.amberSoft,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                Expanded(
+                  child: _students.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(22),
+                                decoration: BoxDecoration(
+                                  color: _Palette.textFaint.withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.groups_rounded, size: 46, color: _Palette.textFaint),
+                              ),
+                              const SizedBox(height: 16),
+                              const Text('No Students Found',
+                                  style: TextStyle(
+                                      fontSize: 16.5, color: _Palette.textDark, fontWeight: FontWeight.w700)),
+                            ],
                           ),
-                        );
-                      },
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: _students.length,
+                          itemBuilder: (context, index) {
+                            final student = _students[index];
+                            final id = student['id'] as String;
+                            final name = student['name'] as String? ?? 'Student';
+                            final type = student['student_type'] as String? ?? 'Unknown';
+                            final status = _attendanceStatus[id] ?? 'Present';
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: _Palette.surface,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: _Palette.border),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.03),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 5),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const CircleAvatar(
+                                        radius: 19,
+                                        backgroundColor: _Palette.bg,
+                                        child: Icon(Icons.person_rounded, color: _Palette.textMuted, size: 18),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(name,
+                                                style: const TextStyle(
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: _Palette.textDark)),
+                                            const SizedBox(height: 2),
+                                            Text(type,
+                                                style: const TextStyle(
+                                                    fontSize: 12.5,
+                                                    color: _Palette.textMuted,
+                                                    fontWeight: FontWeight.w500)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _StatusSegmented(
+                                    value: status,
+                                    onChanged: (val) => setState(() => _attendanceStatus[id] = val),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+
+                // Save button
+                Container(
+                  padding: EdgeInsets.fromLTRB(
+                    16, 12, 16, MediaQuery.of(context).padding.bottom + 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _Palette.surface,
+                    border: const Border(top: BorderSide(color: _Palette.border)),
+                  ),
+                  child: SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _saving ? null : _saveAttendance,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _Palette.primary,
+                        disabledBackgroundColor: _Palette.primary.withOpacity(0.6),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.4,
+                              ),
+                            )
+                          : const Text('Save Attendance',
+                              style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _saveAttendance,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF4E7E),
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Save Attendance'),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Small pill showing a live count for a status, matching card palette.
+class _CountChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color;
+  final Color bg;
+
+  const _CountChip({
+    required this.label,
+    required this.count,
+    required this.color,
+    required this.bg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          Text('$count',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: color.withOpacity(0.85))),
+        ],
+      ),
+    );
+  }
+}
+
+/// Segmented Present / Absent / Late selector — replaces the old dropdown
+/// with a tappable, color-coded control that fits the playful theme.
+class _StatusSegmented extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _StatusSegmented({required this.value, required this.onChanged});
+
+  static const _options = [
+    ('Present', Icons.check_circle_rounded, _Palette.success, _Palette.successSoft),
+    ('Absent', Icons.cancel_rounded, _Palette.danger, _Palette.dangerSoft),
+    ('Late', Icons.schedule_rounded, _Palette.amber, _Palette.amberSoft),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: _options.map((opt) {
+        final (label, icon, color, bg) = opt;
+        final selected = value == label;
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: label == 'Late' ? 0 : 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => onChanged(label),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: selected ? bg : _Palette.bg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: selected ? color.withOpacity(0.4) : _Palette.border,
                   ),
-                ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 17, color: selected ? color : _Palette.textFaint),
+                    const SizedBox(height: 3),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? color : _Palette.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
