@@ -32,15 +32,13 @@ class _AuthScreenState extends State<AuthScreen>
       parent: _animController,
       curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
     );
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.25),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animController,
-        curve: const Interval(0.2, 1.0, curve: Curves.easeOutCubic),
-      ),
-    );
+    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.25), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _animController,
+            curve: const Interval(0.2, 1.0, curve: Curves.easeOutCubic),
+          ),
+        );
     _animController.forward();
   }
 
@@ -119,7 +117,7 @@ class _AuthScreenState extends State<AuthScreen>
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Sign-in failed. Please try again.';
+          _error = 'Sign-in failed. Please try again. $e';
           _loading = false;
         });
       }
@@ -212,10 +210,9 @@ class _AuthScreenState extends State<AuthScreen>
 
                           // App name
                           ShaderMask(
-                            shaderCallback: (bounds) =>
-                                const LinearGradient(
-                                  colors: [primary, primaryDark],
-                                ).createShader(bounds),
+                            shaderCallback: (bounds) => const LinearGradient(
+                              colors: [primary, primaryDark],
+                            ).createShader(bounds),
                             child: const Text(
                               'Strawberry',
                               textAlign: TextAlign.center,
@@ -395,10 +392,7 @@ class _GoogleSignInButtonState extends State<_GoogleSignInButton> {
           decoration: BoxDecoration(
             color: _pressed ? const Color(0xFFF5F5F5) : Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: const Color(0xFFE0E0E0),
-              width: 1.5,
-            ),
+            border: Border.all(color: const Color(0xFFE0E0E0), width: 1.5),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: _pressed ? 0.03 : 0.08),
