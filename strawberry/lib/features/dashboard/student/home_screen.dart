@@ -18,6 +18,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _profile;
   bool _loading = true;
 
+  static const Color _bg = Color(0xFFF6F6FB);
+  static const Color _surface = Colors.white;
+  static const Color _primary = Color(0xFFE94464);
+  static const Color _accentPeach = Color(0xFFFF8FA3);
+  static const Color _primarySoft = Color(0xFFFFE7EC);
+  static const Color _textDark = Color(0xFF1E1B24);
+  static const Color _textMuted = Color(0xFF8A8794);
+  static const Color _border = Color(0xFFEDEDF4);
+
   @override
   void initState() {
     super.initState();
@@ -49,17 +58,24 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: _bg,
       appBar: AppBar(
         title: const Text(
           'Student Dashboard',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 19,
+            color: _textDark,
+          ),
         ),
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: _surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        shape: const Border(bottom: BorderSide(color: _border, width: 1)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+            icon: const Icon(Icons.logout_rounded, color: _primary),
             onPressed: _logout,
             tooltip: 'Log Out',
           ),
@@ -67,31 +83,30 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF4E7E)),
+              child: CircularProgressIndicator(color: _primary),
             )
           : RefreshIndicator(
               onRefresh: _loadProfile,
-              color: const Color(0xFFFF4E7E),
-              backgroundColor: const Color(0xFF1E1E2C),
+              color: _primary,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24.0),
+                padding: const EdgeInsets.all(20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Profile Header Card
                     Container(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [Color(0xFFFF4E7E), Color(0xFFFF805D)],
+                          colors: [_primary, _accentPeach],
                         ),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFF4E7E).withOpacity(0.3),
+                            color: _primary.withValues(alpha: 0.25),
                             blurRadius: 16,
                             offset: const Offset(0, 8),
                           ),
@@ -100,97 +115,107 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               CircleAvatar(
-                                radius: 30,
+                                radius: 28,
                                 backgroundColor: Colors.white24,
-                                child: Icon(
-                                  Icons.person,
-                                  size: 36,
-                                  color: Colors.white,
-                                ),
+                                backgroundImage: (_profile?['photo_url'] as String?) != null &&
+                                        (_profile!['photo_url'] as String).isNotEmpty
+                                    ? NetworkImage(_profile!['photo_url'])
+                                    : null,
+                                child: (_profile?['photo_url'] as String?) == null ||
+                                        (_profile!['photo_url'] as String).isEmpty
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 32,
+                                        color: Colors.white,
+                                      )
+                                    : null,
                               ),
-                              Icon(
+                              const Icon(
                                 Icons.verified_user_rounded,
                                 color: Colors.white,
                                 size: 28,
                               ),
                             ],
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 18),
                           Text(
                             _profile?['name'] ?? 'Student',
                             style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
                               color: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            _profile?['phone'] ?? '',
+                            (_profile?['email'] ?? _profile?['phone'] ?? '').toString(),
                             style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 13.5,
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 24),
 
                     const Text(
                       'Academic Info',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: _textDark,
+                        letterSpacing: 0.1,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
 
                     // Detail Row 1: Student Type
                     _buildInfoCard(
                       icon: Icons.school_rounded,
                       title: 'Admission Type',
                       value: _profile?['student_type'] ?? 'Regular',
-                      color: const Color(0xFF4E7EFF),
+                      color: const Color(0xFF3E8EFF),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
 
                     // Detail Row 2: Fees details
                     _buildInfoCard(
                       icon: Icons.account_balance_wallet_rounded,
                       title: 'Academic Fees',
-                      value: '₹${_profile?['fees'] ?? 0}',
-                      color: const Color(0xFF00C853),
+                      value: '₹${_profile?['fees'] ?? 0}/month',
+                      color: const Color(0xFF22B07D),
                     ),
 
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 24),
                     const Text(
                       'Quick Actions',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: _textDark,
+                        letterSpacing: 0.1,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
 
                     GridView.count(
                       crossAxisCount: 2,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
                       children: [
                         _buildNavCard(
                           icon: Icons.event_available_rounded,
                           title: 'Attendance',
                           subtitle: 'View records',
-                          color: const Color(0xFF00C853),
+                          color: const Color(0xFF22B07D),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const AttendancePage(),
@@ -201,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: Icons.photo_library_rounded,
                           title: 'Gallery',
                           subtitle: 'School events',
-                          color: const Color(0xFFFFC107),
+                          color: const Color(0xFFF5A623),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const GalleryPage(),
@@ -212,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: Icons.campaign_rounded,
                           title: 'Notices',
                           subtitle: 'Latest updates',
-                          color: const Color(0xFF29B6F6),
+                          color: const Color(0xFF3E8EFF),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const NoticeBoardPage(),
@@ -223,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: Icons.forum_rounded,
                           title: 'Chat Support',
                           subtitle: 'Talk with Admin',
-                          color: const Color(0xFFFF4E7E),
+                          color: _primary,
                           onTap: () {
                             final uid = _authService.currentUserId ?? '';
                             final name = _profile?['name'] ?? 'Student';
@@ -240,11 +265,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 28),
                     const Text(
-                      'Welcome to your Strawberry Student ERP. Use this dashboard to check your billing and status.',
+                      'Welcome to your Strawberry Student ERP.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, color: _textMuted),
                     ),
                   ],
                 ),
@@ -260,41 +285,42 @@ class _HomeScreenState extends State<HomeScreen> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
+        color: _surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+        border: Border.all(color: _border),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(icon, color: color, size: 28),
+            child: Icon(icon, color: color, size: 26),
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.5),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: _textMuted,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   value,
                   style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: _textDark,
                   ),
                 ),
               ],
@@ -318,9 +344,16 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
+          color: _surface,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: _border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -329,8 +362,8 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(icon, color: color, size: 24),
             ),
@@ -339,16 +372,17 @@ class _HomeScreenState extends State<HomeScreen> {
               title,
               style: const TextStyle(
                 fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                color: _textDark,
               ),
             ),
             const SizedBox(height: 2),
             Text(
               subtitle,
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.white.withValues(alpha: 0.5),
+              style: const TextStyle(
+                fontSize: 11,
+                color: _textMuted,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],

@@ -7,11 +7,11 @@ class ChatPage extends StatefulWidget {
   final bool isAdmin;
 
   const ChatPage({
-    Key? key,
+    super.key,
     required this.studentId,
     required this.studentName,
     required this.isAdmin,
-  }) : super(key: key);
+  });
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -23,11 +23,17 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController _scrollController = ScrollController();
   late final Stream<List<Map<String, dynamic>>> _chatStream;
 
+  static const Color _bg = Color(0xFFF6F6FB);
+  static const Color _surface = Colors.white;
+  static const Color _primary = Color(0xFFE94464);
+  static const Color _primarySoft = Color(0xFFFFE7EC);
+  static const Color _textDark = Color(0xFF1E1B24);
+  static const Color _textMuted = Color(0xFF8A8794);
+  static const Color _border = Color(0xFFEDEDF4);
+
   @override
   void initState() {
     super.initState();
-    // Stream ek hi baar banao, warna har build pe naya stream banega
-    // aur rebuild ka infinite loop chalega (messages show nahi honge).
     _chatStream = _authService.getChatStream(widget.studentId);
   }
 
@@ -67,7 +73,7 @@ class _ChatPageState extends State<ChatPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send message: $e'),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: const Color(0xFFEF4949),
         ),
       );
     }
@@ -76,7 +82,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: _bg,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -84,19 +90,23 @@ class _ChatPageState extends State<ChatPage> {
             Text(
               widget.isAdmin ? widget.studentName : 'Chat with Admin',
               style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
+                color: _textDark,
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
               ),
             ),
             Text(
               widget.isAdmin ? 'Student Chat' : 'Online Support',
-              style: const TextStyle(color: Colors.white60, fontSize: 12),
+              style: const TextStyle(color: _textMuted, fontSize: 11.5),
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: _surface,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: _textDark,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        shape: const Border(bottom: BorderSide(color: _border, width: 1)),
       ),
       body: Column(
         children: [
@@ -106,7 +116,7 @@ class _ChatPageState extends State<ChatPage> {
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF4E7E)),
+                    child: CircularProgressIndicator(color: _primary),
                   );
                 }
 
@@ -114,7 +124,7 @@ class _ChatPageState extends State<ChatPage> {
                   return const Center(
                     child: Text(
                       'No messages yet. Send a message to start.',
-                      style: TextStyle(color: Colors.white38),
+                      style: TextStyle(color: _textMuted, fontSize: 14),
                     ),
                   );
                 }
@@ -146,9 +156,8 @@ class _ChatPageState extends State<ChatPage> {
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          color: isMe
-                              ? const Color(0xFFFF4E7E)
-                              : const Color(0xFF1E1E2C),
+                          color: isMe ? _primary : _surface,
+                          border: isMe ? null : Border.all(color: _border),
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(16),
                             topRight: const Radius.circular(16),
@@ -159,15 +168,23 @@ class _ChatPageState extends State<ChatPage> {
                                 ? Radius.zero
                                 : const Radius.circular(16),
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         constraints: BoxConstraints(
                           maxWidth: MediaQuery.of(context).size.width * 0.75,
                         ),
                         child: Text(
                           text,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
+                          style: TextStyle(
+                            color: isMe ? Colors.white : _textDark,
+                            fontSize: 14.5,
+                            fontWeight: isMe ? FontWeight.w600 : FontWeight.w500,
                           ),
                         ),
                       ),
@@ -186,36 +203,47 @@ class _ChatPageState extends State<ChatPage> {
   Widget _buildInputArea() {
     return Container(
       padding: const EdgeInsets.only(left: 16, right: 16, bottom: 24, top: 12),
-      color: const Color(0xFF1E1E2C),
+      decoration: const BoxDecoration(
+        color: _surface,
+        border: Border(top: BorderSide(color: _border, width: 1)),
+      ),
       child: Row(
         children: [
           Expanded(
             child: TextField(
               controller: _messageController,
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(color: _textDark, fontSize: 14.5),
               decoration: InputDecoration(
                 hintText: 'Type your message...',
-                hintStyle: const TextStyle(color: Colors.white38),
+                hintStyle: const TextStyle(color: _textMuted, fontSize: 14),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
+                  borderSide: const BorderSide(color: _border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: const BorderSide(color: _border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: const BorderSide(color: _primary, width: 1.5),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
                 ),
                 filled: true,
-                fillColor: const Color(0xFF0F0F1A),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
+                fillColor: _bg,
               ),
               onSubmitted: (_) => _sendMessage(),
             ),
           ),
           const SizedBox(width: 8),
           CircleAvatar(
-            backgroundColor: const Color(0xFFFF4E7E),
             radius: 22,
+            backgroundColor: _primary,
             child: IconButton(
-              icon: const Icon(Icons.send, color: Colors.white, size: 20),
+              icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
               onPressed: _sendMessage,
             ),
           ),

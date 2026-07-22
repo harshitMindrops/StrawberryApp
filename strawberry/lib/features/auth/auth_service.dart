@@ -192,13 +192,30 @@ class AuthService {
     return List<Map<String, dynamic>>.from(response as List);
   }
 
+  // Fetch attendance records for all students for a specific date
+  Future<List<Map<String, dynamic>>> getAttendanceForDate(String date) async {
+    final response = await _supabaseClient
+        .from('attendance')
+        .select('student_id, status')
+        .eq('date', date);
+    return List<Map<String, dynamic>>.from(response as List);
+  }
+
   // Mark attendance for a date; entries: list of maps {student_id, status}
   Future<void> markAttendance(
     String date,
     List<Map<String, dynamic>> entries,
   ) async {
-    // Delete any existing records for this date to avoid duplicates
-    await _supabaseClient.from('attendance').delete().eq('date', date);
+    if (entries.isEmpty) return;
+
+    // Delete existing records for these specific student IDs on this date to avoid duplicates
+    final studentIds = entries.map((e) => e['student_id'] as String).toList();
+    await _supabaseClient
+        .from('attendance')
+        .delete()
+        .eq('date', date)
+        .inFilter('student_id', studentIds);
+
     // Insert new entries with date field
     final toInsert = entries
         .map(
@@ -216,10 +233,77 @@ class AuthService {
   Future<List<Map<String, dynamic>>> getAllStudents() async {
     final response = await _supabaseClient
         .from('profiles')
-        .select('id, name, student_type')
+        .select('id, name, email, photo_url, student_type, fees, fees_paid_months')
         .eq('role', 'student')
         .eq('status', 'approved');
     return List<Map<String, dynamic>>.from(response as List);
+  }
+
+  // Reject a student application (Admin only)
+  Future<void> rejectStudent(String uid) async {
+    await _supabaseClient
+        .from('profiles')
+        .update({'status': 'rejected'})
+        .eq('id', uid);
+  }
+
+  // Re-submit a rejected student's request (Student action)
+  Future<void> reRequestApproval(String uid) async {
+    await _supabaseClient
+        .from('profiles')
+        .update({'status': 'pending'})
+        .eq('id', uid);
+  }
+
+  // Mark a specific month as paid for a student
+  // monthKey format: "YYYY-MM" e.g. "2024-07"
+  Future<void> markFeesPaid(String uid, String monthKey) async {
+    // Fetch current array first
+    final profile = await _supabaseClient
+        .from('profiles')
+        .select('fees_paid_months')
+        .eq('id', uid)
+        .maybeSingle();
+    final existing = List<String>.from(
+      (profile?['fees_paid_months'] as List?) ?? [],
+    );
+    if (!existing.contains(monthKey)) {
+      existing.add(monthKey);
+    }
+    await _supabaseClient
+        .from('profiles')
+        .update({'fees_paid_months': existing})
+        .eq('id', uid);
+  }
+
+  // Remove a month from fees_paid for a student
+  Future<void> unmarkFeesPaid(String uid, String monthKey) async {
+    final profile = await _supabaseClient
+        .from('profiles')
+        .select('fees_paid_months')
+        .eq('id', uid)
+        .maybeSingle();
+    final existing = List<String>.from(
+      (profile?['fees_paid_months'] as List?) ?? [],
+    );
+    existing.remove(monthKey);
+    await _supabaseClient
+        .from('profiles')
+        .update({'fees_paid_months': existing})
+        .eq('id', uid);
+  }
+
+  // Update a student's category and/or fees (Upgrade Student)
+  Future<void> updateStudent(
+    String uid, {
+    String? studentType,
+    double? fees,
+  }) async {
+    final updates = <String, dynamic>{};
+    if (studentType != null) updates['student_type'] = studentType;
+    if (fees != null) updates['fees'] = fees;
+    if (updates.isEmpty) return;
+    await _supabaseClient.from('profiles').update(updates).eq('id', uid);
   }
 
   // ----- Notice Methods -----

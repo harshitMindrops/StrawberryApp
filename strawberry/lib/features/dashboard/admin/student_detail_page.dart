@@ -1,0 +1,749 @@
+import 'package:flutter/material.dart';
+import 'package:strawberry/features/auth/auth_service.dart';
+
+/// Full-screen admin detail page for a student
+class StudentDetailPage extends StatefulWidget {
+  final Map<String, dynamic> student;
+  final AuthService authService;
+
+  const StudentDetailPage({
+    super.key,
+    required this.student,
+    required this.authService,
+  });
+
+  @override
+  State<StudentDetailPage> createState() => _StudentDetailPageState();
+}
+
+class _StudentDetailPageState extends State<StudentDetailPage> {
+  late Map<String, dynamic> _student;
+  bool _saving = false;
+
+  // ── Palette (mirrors admin_dashboard tokens) ──────────────────────────
+  static const _primary = Color(0xFFE94464);
+  static const _primarySoft = Color(0xFFFFE7EC);
+  static const _primaryDark = Color(0xFFD32F52);
+  static const _accentPeach = Color(0xFFFF8FA3);
+  static const _bg = Color(0xFFF6F6FB);
+  static const _surface = Colors.white;
+  static const _border = Color(0xFFEDEDF4);
+  static const _textDark = Color(0xFF1E1B24);
+  static const _textMuted = Color(0xFF8A8794);
+  static const _success = Color(0xFF22B07D);
+  static const _danger = Color(0xFFEF4949);
+
+  @override
+  void initState() {
+    super.initState();
+    _student = Map<String, dynamic>.from(widget.student);
+  }
+
+  List<String> get _paidMonths =>
+      List<String>.from((_student['fees_paid_months'] as List?) ?? []);
+
+  // ── Mark month as paid ──────────────────────────────────────────────
+  Future<void> _showMarkFeeDialog() async {
+    final now = DateTime.now();
+    // Show last 24 months as options
+    final months = List.generate(24, (i) {
+      final d = DateTime(now.year, now.month - i, 1);
+      return '${d.year}-${d.month.toString().padLeft(2, '0')}';
+    });
+
+    String? selected;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlg) {
+            return AlertDialog(
+              backgroundColor: _surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              title: const Text(
+                'Mark Month as Paid',
+                style: TextStyle(
+                  color: _textDark,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Select the month for which fees have been received:',
+                    style: TextStyle(color: _textMuted, fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    value: selected,
+                    dropdownColor: _surface,
+                    style: const TextStyle(color: _textDark),
+                    decoration: InputDecoration(
+                      labelText: 'Month',
+                      labelStyle: const TextStyle(color: _textMuted),
+                      prefixIcon: const Icon(Icons.calendar_month_rounded,
+                          color: _primary, size: 20),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: _border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide:
+                            const BorderSide(color: _primary, width: 1.6),
+                      ),
+                      filled: true,
+                      fillColor: _bg,
+                    ),
+                    items: months
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(_formatMonthKey(m)),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setDlg(() => selected = v),
+                  ),
+                ],
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: TextButton.styleFrom(foregroundColor: _textMuted),
+                  child: const Text('Cancel',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                ElevatedButton(
+                  onPressed: selected == null
+                      ? null
+                      : () async {
+                          Navigator.pop(ctx);
+                          await _markPaid(selected!);
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _success,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Confirm',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _markPaid(String monthKey) async {
+    setState(() => _saving = true);
+    try {
+      await widget.authService.markFeesPaid(_student['id'], monthKey);
+      final updated = List<String>.from(_paidMonths);
+      if (!updated.contains(monthKey)) updated.add(monthKey);
+      updated.sort((a, b) => b.compareTo(a)); // newest first
+      setState(() {
+        _student['fees_paid_months'] = updated;
+        _saving = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snack('Fees marked paid for ${_formatMonthKey(monthKey)}',
+              success: true),
+        );
+      }
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snack('Failed to mark fees. Try again.', success: false),
+        );
+      }
+    }
+  }
+
+  Future<void> _unmarkPaid(String monthKey) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove Payment?',
+            style: TextStyle(color: _textDark, fontWeight: FontWeight.w800)),
+        content: Text(
+          'Remove payment record for ${_formatMonthKey(monthKey)}?',
+          style: const TextStyle(color: _textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child:
+                const Text('Cancel', style: TextStyle(color: _textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _danger,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+    setState(() => _saving = true);
+    try {
+      await widget.authService.unmarkFeesPaid(_student['id'], monthKey);
+      final updated = List<String>.from(_paidMonths)..remove(monthKey);
+      setState(() {
+        _student['fees_paid_months'] = updated;
+        _saving = false;
+      });
+    } catch (e) {
+      setState(() => _saving = false);
+    }
+  }
+
+  // ── Upgrade student sheet ────────────────────────────────────────────
+  void _openUpgradeSheet() {
+    String? selectedType = _student['student_type'] as String?;
+    final customTypeController = TextEditingController(
+      text: (selectedType != null &&
+              !['Preschool', 'Daycare', 'Both'].contains(selectedType))
+          ? selectedType
+          : '',
+    );
+    if (selectedType != null &&
+        !['Preschool', 'Daycare', 'Both'].contains(selectedType)) {
+      selectedType = 'Other';
+    }
+    final feesController = TextEditingController(
+      text: (_student['fees'] ?? 0).toString(),
+    );
+    final formKey = GlobalKey<FormState>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              top: 12,
+              left: 24,
+              right: 24,
+            ),
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 18),
+                      decoration: BoxDecoration(
+                        color: _border,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                  const Text('Upgrade Student',
+                      style: TextStyle(
+                          color: _textDark,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(
+                    value: selectedType,
+                    dropdownColor: _surface,
+                    style: const TextStyle(color: _textDark, fontSize: 15),
+                    decoration: _inputDecor(
+                        label: 'Student Type',
+                        icon: Icons.school_rounded),
+                    items: const [
+                      DropdownMenuItem(
+                          value: 'Preschool', child: Text('Preschool')),
+                      DropdownMenuItem(
+                          value: 'Daycare', child: Text('Daycare')),
+                      DropdownMenuItem(value: 'Both', child: Text('Both')),
+                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    ],
+                    onChanged: (v) => setSheet(() => selectedType = v),
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Select type' : null,
+                  ),
+                  if (selectedType == 'Other') ...[
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: customTypeController,
+                      style: const TextStyle(color: _textDark),
+                      decoration: _inputDecor(
+                          label: 'Custom Type', icon: Icons.edit_rounded),
+                      validator: (v) => (selectedType == 'Other' &&
+                              (v == null || v.trim().isEmpty))
+                          ? 'Enter custom type'
+                          : null,
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: feesController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: _textDark),
+                    decoration: _inputDecor(
+                        label: 'Monthly Fees (₹)',
+                        icon: Icons.currency_rupee_rounded),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Enter fees' : null,
+                  ),
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        if (!formKey.currentState!.validate()) return;
+                        final type = selectedType == 'Other'
+                            ? customTypeController.text.trim()
+                            : selectedType!;
+                        final fees =
+                            double.tryParse(feesController.text.trim()) ?? 0.0;
+                        Navigator.pop(ctx);
+                        await _doUpgrade(type, fees);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18)),
+                      ),
+                      child: const Text('Save Changes',
+                          style: TextStyle(
+                              fontSize: 15.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  Future<void> _doUpgrade(String type, double fees) async {
+    setState(() => _saving = true);
+    try {
+      await widget.authService.updateStudent(
+        _student['id'],
+        studentType: type,
+        fees: fees,
+      );
+      setState(() {
+        _student['student_type'] = type;
+        _student['fees'] = fees;
+        _saving = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snack('Student updated successfully!', success: true),
+        );
+      }
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snack('Update failed. Try again.', success: false),
+        );
+      }
+    }
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────
+  String _formatMonthKey(String key) {
+    // "2024-07" → "July 2024"
+    final parts = key.split('-');
+    if (parts.length != 2) return key;
+    final months = [
+      '',
+      'January', 'February', 'March', 'April',
+      'May', 'June', 'July', 'August',
+      'September', 'October', 'November', 'December',
+    ];
+    final m = int.tryParse(parts[1]) ?? 0;
+    return '${months[m]} ${parts[0]}';
+  }
+
+  static InputDecoration _inputDecor(
+      {required String label, required IconData icon}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: _textMuted, fontSize: 14),
+      prefixIcon: Icon(icon, color: _primary, size: 20),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _primary, width: 1.6),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _danger),
+      ),
+      filled: true,
+      fillColor: _bg,
+    );
+  }
+
+  static SnackBar _snack(String msg, {required bool success}) {
+    return SnackBar(
+      content: Row(children: [
+        Icon(
+          success ? Icons.check_circle_rounded : Icons.error_rounded,
+          color: Colors.white,
+          size: 18,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(msg,
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+        ),
+      ]),
+      backgroundColor: success ? _success : _danger,
+      behavior: SnackBarBehavior.floating,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      margin: const EdgeInsets.all(16),
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final name = _student['name'] ?? 'Student';
+    final email = _student['email'] ?? '';
+    final photoUrl = _student['photo_url'] as String?;
+    final type = _student['student_type'] ?? '—';
+    final fees = _student['fees'];
+    final feesDisplay =
+        fees != null ? '₹${fees.toStringAsFixed(0)}/month' : '—';
+    final paid = _paidMonths..sort((a, b) => b.compareTo(a));
+    final totalPaid = paid.length;
+
+    return Scaffold(
+      backgroundColor: _bg,
+      body: CustomScrollView(
+        slivers: [
+          // ── App bar with photo ───────────────────────────────────────
+          SliverAppBar(
+            expandedHeight: 220,
+            pinned: true,
+            backgroundColor: _surface,
+            foregroundColor: _textDark,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            shape: const Border(
+                bottom: BorderSide(color: _border, width: 1)),
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [_primary, _accentPeach],
+                  ),
+                ),
+                child: SafeArea(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 40),
+                      // Profile photo
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.3),
+                        ),
+                        child: CircleAvatar(
+                          radius: 44,
+                          backgroundColor: Colors.white,
+                          backgroundImage: photoUrl != null
+                              ? NetworkImage(photoUrl)
+                              : null,
+                          child: photoUrl == null
+                              ? const Icon(Icons.person_rounded,
+                                  size: 44, color: _primary)
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        type,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              if (_saving)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        color: _primary, strokeWidth: 2),
+                  ),
+                ),
+            ],
+          ),
+
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── Contact Info ────────────────────────────────────
+                  _sectionTitle('Contact Info'),
+                  const SizedBox(height: 10),
+                  _infoCard(children: [
+                    _infoRow(
+                        icon: Icons.email_rounded,
+                        label: 'Email',
+                        value: email.isEmpty ? '—' : email),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // ── Academic Info ───────────────────────────────────
+                  _sectionTitle('Academic Info'),
+                  const SizedBox(height: 10),
+                  _infoCard(children: [
+                    _infoRow(
+                        icon: Icons.school_rounded,
+                        label: 'Category',
+                        value: type),
+                    const Divider(color: _border, height: 1),
+                    _infoRow(
+                        icon: Icons.currency_rupee_rounded,
+                        label: 'Monthly Fees',
+                        value: feesDisplay),
+                    const Divider(color: _border, height: 1),
+                    _infoRow(
+                        icon: Icons.receipt_long_rounded,
+                        label: 'Months Paid',
+                        value: '$totalPaid month${totalPaid == 1 ? '' : 's'}',
+                        valueColor: _success),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // ── Fees Payment History ─────────────────────────────
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _sectionTitle('Payment History'),
+                      GestureDetector(
+                        onTap: _saving ? null : _showMarkFeeDialog,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _primarySoft,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.add_rounded,
+                                  color: _primaryDark, size: 16),
+                              SizedBox(width: 4),
+                              Text(
+                                'Mark Paid',
+                                style: TextStyle(
+                                  color: _primaryDark,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (paid.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: _surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _border),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'No payment records yet.',
+                          style: TextStyle(color: _textMuted, fontSize: 14),
+                        ),
+                      ),
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: paid.map((m) {
+                        return GestureDetector(
+                          onLongPress: () => _unmarkPaid(m),
+                          child: Chip(
+                            label: Text(_formatMonthKey(m)),
+                            backgroundColor: _success.withOpacity(0.1),
+                            labelStyle: const TextStyle(
+                              color: _success,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12.5,
+                            ),
+                            avatar: const Icon(Icons.check_circle_rounded,
+                                color: _success, size: 16),
+                            deleteIcon: const Icon(Icons.close_rounded,
+                                size: 14, color: _textMuted),
+                            onDeleted: () => _unmarkPaid(m),
+                            side: BorderSide(
+                                color: _success.withOpacity(0.3)),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  const SizedBox(height: 6),
+                  if (paid.isNotEmpty)
+                    Text(
+                      'Long-press or tap ✕ on a chip to remove a payment record.',
+                      style: TextStyle(
+                          color: _textMuted.withOpacity(0.7), fontSize: 11.5),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+
+      // ── Floating Upgrade button ──────────────────────────────────────
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _saving ? null : _openUpgradeSheet,
+        backgroundColor: _primary,
+        foregroundColor: Colors.white,
+        elevation: 3,
+        icon: const Icon(Icons.upgrade_rounded),
+        label: const Text(
+          'Upgrade Student',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w800,
+        color: _textDark,
+        letterSpacing: 0.1,
+      ),
+    );
+  }
+
+  Widget _infoCard({required List<Widget> children}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _infoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    Color valueColor = _textDark,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _primarySoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: _primary, size: 18),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 11.5,
+                        color: _textMuted,
+                        fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(value,
+                    style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: valueColor)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -121,6 +121,10 @@ class _SplashScreenState extends State<SplashScreen>
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const WaitScreen()),
         );
+      } else if (status == 'rejected') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const WaitScreen(isRejected: true)),
+        );
       } else if (status == 'approved') {
         if (role == 'admin') {
           Navigator.of(context).pushReplacement(
@@ -132,13 +136,14 @@ class _SplashScreenState extends State<SplashScreen>
           );
         }
       } else {
-        // If rejected or any other status, force logout and return to auth screen
+        // Unknown status — force logout
         await authService.logout();
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const AuthScreen()),
         );
       }
+
     } catch (e) {
       // In case of error, fall back to AuthScreen
       Navigator.of(

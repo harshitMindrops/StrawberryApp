@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
 
 class NoticeBoardPage extends StatefulWidget {
-  const NoticeBoardPage({Key? key}) : super(key: key);
+  const NoticeBoardPage({super.key});
 
   @override
   State<NoticeBoardPage> createState() => _NoticeBoardPageState();
@@ -14,6 +14,14 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
   bool _loading = true;
   String _selectedCategory = 'All';
 
+  static const Color _bg = Color(0xFFF6F6FB);
+  static const Color _surface = Colors.white;
+  static const Color _primary = Color(0xFFE94464);
+  static const Color _primarySoft = Color(0xFFFFE7EC);
+  static const Color _textDark = Color(0xFF1E1B24);
+  static const Color _textMuted = Color(0xFF8A8794);
+  static const Color _border = Color(0xFFEDEDF4);
+
   @override
   void initState() {
     super.initState();
@@ -24,9 +32,7 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
     setState(() => _loading = true);
     final uid = _authService.currentUserId;
     try {
-      // Fetch general notices for 'All' audience
       final all = await _authService.getNotices(audience: 'All');
-      // Fetch student-specific notices (targeted at this student)
       final specific = await _authService.getStudentSpecificNotices(uid ?? '');
       if (!mounted) return;
       setState(() {
@@ -41,7 +47,6 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Filter notices
     final filteredNotices = _selectedCategory == 'All'
         ? _notices
         : _notices
@@ -49,14 +54,22 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
               .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: _bg,
       appBar: AppBar(
         title: const Text(
           'Notice Board',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: _textDark,
+            fontWeight: FontWeight.w800,
+            fontSize: 19,
+          ),
         ),
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: _surface,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: _textDark,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        shape: const Border(bottom: BorderSide(color: _border, width: 1)),
       ),
       body: Column(
         children: [
@@ -64,18 +77,18 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
           Expanded(
             child: _loading
                 ? const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF4E7E)),
+                    child: CircularProgressIndicator(color: _primary),
                   )
                 : filteredNotices.isEmpty
                 ? const Center(
                     child: Text(
                       'No notices available',
-                      style: TextStyle(color: Colors.white70),
+                      style: TextStyle(color: _textMuted, fontSize: 14),
                     ),
                   )
                 : RefreshIndicator(
                     onRefresh: _loadNotices,
-                    color: const Color(0xFFFF4E7E),
+                    color: _primary,
                     child: ListView.builder(
                       padding: const EdgeInsets.all(16),
                       itemCount: filteredNotices.length,
@@ -88,50 +101,54 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
                             ? n['created_at'].toString().split('T').first
                             : '';
 
-                        Color catColor = Colors.blueAccent;
-                        if (category == 'Fees') catColor = Colors.orangeAccent;
-                        if (category == 'Holiday') catColor = Colors.redAccent;
-                        if (category == 'Event') catColor = Colors.greenAccent;
+                        Color catColor = const Color(0xFF3E8EFF);
+                        if (category == 'Fees') catColor = const Color(0xFFF5A623);
+                        if (category == 'Holiday') catColor = const Color(0xFFEF4949);
+                        if (category == 'Event') catColor = const Color(0xFF22B07D);
 
-                        return Card(
-                          color: const Color(0xFF1E1E2C),
+                        return Container(
                           margin: const EdgeInsets.only(bottom: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                          decoration: BoxDecoration(
+                            color: _surface,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: _border),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.02),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
                           child: Padding(
-                            padding: const EdgeInsets.all(16.0),
+                            padding: const EdgeInsets.all(18.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
+                                    horizontal: 10,
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: catColor.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: catColor,
-                                      width: 0.5,
-                                    ),
+                                    color: catColor.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Text(
                                     category,
                                     style: TextStyle(
                                       color: catColor,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 10),
+                                const SizedBox(height: 12),
                                 Text(
                                   title,
                                   style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
+                                    color: _textDark,
+                                    fontWeight: FontWeight.w800,
                                     fontSize: 16,
                                   ),
                                 ),
@@ -139,19 +156,22 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
                                 Text(
                                   body,
                                   style: const TextStyle(
-                                    color: Colors.white70,
+                                    color: _textMuted,
                                     fontSize: 14,
+                                    height: 1.4,
                                   ),
                                 ),
-                                const SizedBox(height: 12),
-                                const Divider(color: Colors.white10),
+                                const SizedBox(height: 14),
+                                const Divider(color: _border, height: 1),
+                                const SizedBox(height: 10),
                                 Align(
                                   alignment: Alignment.centerRight,
                                   child: Text(
                                     'Posted on: $created',
                                     style: const TextStyle(
-                                      color: Colors.white38,
-                                      fontSize: 11,
+                                      color: _textMuted,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ),
@@ -171,12 +191,11 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
   Widget _buildCategoryFilterRow() {
     final categories = ['All', 'General', 'Fees', 'Holiday', 'Event'];
     return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      color: const Color(0xFF1E1E2C),
+      height: 56,
+      color: _surface,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         itemCount: categories.length,
         itemBuilder: (context, index) {
           final cat = categories[index];
@@ -186,16 +205,17 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
             child: ChoiceChip(
               label: Text(cat),
               selected: isSelected,
-              selectedColor: const Color(0xFFFF4E7E),
-              backgroundColor: const Color(0xFF0F0F1A),
+              selectedColor: _primary,
+              backgroundColor: _bg,
               labelStyle: TextStyle(
-                color: isSelected ? Colors.white : Colors.white60,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.white : _textMuted,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                fontSize: 13,
               ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
                 side: BorderSide(
-                  color: isSelected ? const Color(0xFFFF4E7E) : Colors.white10,
+                  color: isSelected ? _primary : _border,
                 ),
               ),
               onSelected: (selected) {

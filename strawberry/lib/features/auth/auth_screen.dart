@@ -95,6 +95,13 @@ class _AuthScreenState extends State<AuthScreen>
             MaterialPageRoute(builder: (_) => const WaitScreen()),
             (route) => false,
           );
+        } else if (status == 'rejected') {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (_) => const WaitScreen(isRejected: true),
+            ),
+            (route) => false,
+          );
         } else if (status == 'approved') {
           if (role == 'admin') {
             Navigator.of(context).pushAndRemoveUntil(
@@ -109,7 +116,7 @@ class _AuthScreenState extends State<AuthScreen>
           }
         } else {
           setState(() {
-            _error = 'Your registration request was rejected by the Admin.';
+            _error = 'Invalid profile status. Please contact support.';
             _loading = false;
           });
         }

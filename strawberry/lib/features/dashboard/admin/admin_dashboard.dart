@@ -5,6 +5,7 @@ import 'package:strawberry/features/auth/auth_service.dart';
 import 'attendance_mark_page.dart';
 import 'gallery_admin_page.dart';
 import 'notice_admin_page.dart';
+import 'student_detail_page.dart';
 import 'package:strawberry/features/chat/chat_page.dart';
 
 /// ---------------------------------------------------------------------
@@ -209,7 +210,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
   // ---------------------------------------------------------------------
   void _openApprovalSheet(Map<String, dynamic> request) {
     final name = request['name'] ?? 'Unknown';
-    final phone = request['phone'] ?? '';
     final uid = request['id'] ?? '';
 
     String? _selectedStudentType;
@@ -304,14 +304,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               ),
                               shape: BoxShape.circle,
                             ),
-                            child: const CircleAvatar(
+                            child: CircleAvatar(
                               radius: 20,
                               backgroundColor: Colors.white,
-                              child: Icon(
-                                Icons.person_rounded,
-                                color: _Palette.primary,
-                                size: 20,
-                              ),
+                              backgroundImage: (request['photo_url'] as String?) != null
+                                  ? NetworkImage(request['photo_url'] as String)
+                                  : null,
+                              child: (request['photo_url'] as String?) == null
+                                  ? const Icon(
+                                      Icons.person_rounded,
+                                      color: _Palette.primary,
+                                      size: 20,
+                                    )
+                                  : null,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -329,7 +334,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  phone,
+                                  request['email'] ?? '',
                                   style: _AdminTextStyles.cardSubtitle,
                                 ),
                               ],
@@ -431,7 +436,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                           try {
                             await _authService.approveStudent(uid, type, fees);
-                            if (!context.mounted) return;
+                            if (!mounted) return;
+                            Navigator.of(context).pop(); // Close bottom sheet
                             ScaffoldMessenger.of(context).showSnackBar(
                               _adminSnackBar(
                                 'Successfully approved $name!',
@@ -439,8 +445,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               ),
                             );
                             _loadRequests();
-                            Navigator.pop(context);
                           } catch (e) {
+                            if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               _adminSnackBar(
                                 'Failed to approve student. Please try again.',
@@ -463,6 +469,81 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             fontSize: 15.5,
                             fontWeight: FontWeight.w700,
                           ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Reject button
+                    SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (dialogCtx) => AlertDialog(
+                              backgroundColor: _Palette.surface,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20)),
+                              title: const Text('Reject Application?',
+                                  style: TextStyle(
+                                      color: _Palette.textDark,
+                                      fontWeight: FontWeight.w800)),
+                              content: Text(
+                                'Reject the application from $name? They will be notified and can re-apply.',
+                                style: const TextStyle(color: _Palette.textMuted),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dialogCtx, false),
+                                  child: const Text('Cancel',
+                                      style: TextStyle(color: _Palette.textMuted)),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.pop(dialogCtx, true),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _Palette.danger,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  child: const Text('Reject'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            try {
+                              if (!mounted) return;
+                              Navigator.of(context).pop(); // Close bottom sheet
+                              await _authService.rejectStudent(uid);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                _adminSnackBar(
+                                  'Application from $name has been rejected.',
+                                  success: false,
+                                ),
+                              );
+                              _loadRequests();
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                _adminSnackBar(
+                                    'Failed to reject. Try again.',
+                                    success: false),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.close_rounded,
+                            color: _Palette.danger, size: 18),
+                        label: const Text('Reject Application',
+                            style: TextStyle(
+                                color: _Palette.danger,
+                                fontWeight: FontWeight.w700)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: _Palette.danger),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18)),
                         ),
                       ),
                     ),
@@ -531,7 +612,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   // Add admin dialog
   // ---------------------------------------------------------------------
   void _openAddAdminDialog() {
-    final phoneController = TextEditingController();
+    final emailController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
     showDialog(
@@ -578,7 +659,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Enter the phone number that will be granted administrator access upon registration.',
+                  'Enter the email address that will be granted administrator access upon registration.',
                   style: TextStyle(
                     fontSize: 13,
                     color: _Palette.textMuted,
@@ -587,26 +668,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
                 const SizedBox(height: 20),
                 TextFormField(
-                  controller: phoneController,
-                  keyboardType: TextInputType.phone,
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
                   style: const TextStyle(
                     color: _Palette.textDark,
                     fontWeight: FontWeight.w600,
                   ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(10),
-                  ],
                   decoration: InputDecoration(
-                    labelText: 'Phone Number',
+                    labelText: 'Email Address',
                     labelStyle: const TextStyle(
                       color: _Palette.textMuted,
                       fontSize: 14,
                     ),
-                    prefixText: '+91 ',
-                    prefixStyle: const TextStyle(
-                      color: _Palette.textDark,
-                      fontWeight: FontWeight.w700,
+                    prefixIcon: const Icon(
+                      Icons.email_rounded,
+                      color: _Palette.primary,
+                      size: 20,
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -619,15 +696,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         width: 1.6,
                       ),
                     ),
+                    errorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: _Palette.danger),
+                    ),
                     filled: true,
                     fillColor: _Palette.bg,
                   ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
-                      return 'Please enter mobile number';
+                      return 'Please enter an email address';
                     }
-                    if (value.trim().length != 10) {
-                      return 'Must be 10 digits';
+                    final emailRegex = RegExp(
+                      r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$',
+                    );
+                    if (!emailRegex.hasMatch(value.trim())) {
+                      return 'Enter a valid email address';
                     }
                     return null;
                   },
@@ -648,21 +732,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ElevatedButton(
               onPressed: () async {
                 if (!formKey.currentState!.validate()) return;
-                final rawPhone = phoneController.text.trim();
-                final fullPhone = '+91$rawPhone';
+                final email = emailController.text.trim();
 
                 try {
-                  await _authService.addAdmin(fullPhone);
+                  await _authService.addAdmin(email);
                   if (!context.mounted) return;
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     _adminSnackBar(
-                      'Granted Admin rights to $fullPhone',
+                      'Granted Admin rights to $email',
                       success: true,
                     ),
                   );
                   _loadAdmins();
                 } catch (e) {
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     _adminSnackBar(
                       'Failed to add admin. Please check permission.',
@@ -891,25 +975,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 onTap: () => _goToNav(1),
               ),
               _StatCard(
-                label: 'Total Students',
-                value: _loadingStudents ? '—' : '${_allStudents.length}',
-                icon: Icons.school_rounded,
+                label: 'Mark Attendance',
+                value: 'Daily',
+                icon: Icons.event_available_rounded,
                 color: _Palette.leafGreen,
-                onTap: () => _goToNav(2),
+                onTap: _openAttendancePage,
               ),
               _StatCard(
-                label: 'Active Chats',
-                value: _loadingChats ? '—' : '${_chatStudents.length}',
-                icon: Icons.chat_bubble_rounded,
+                label: 'Notices',
+                value: 'Campaign',
+                icon: Icons.campaign_rounded,
+                color: _Palette.amber,
+                onTap: _openNoticePage,
+              ),
+              _StatCard(
+                label: 'Gallery',
+                value: 'Albums',
+                icon: Icons.photo_library_rounded,
                 color: _Palette.blueAccent,
-                onTap: () => _goToNav(3),
-              ),
-              _StatCard(
-                label: 'Admins',
-                value: _loadingAdmins ? '—' : '${_allowedAdmins.length}',
-                icon: Icons.admin_panel_settings_rounded,
-                color: _Palette.violet,
-                onTap: _openAdminsPage,
+                onTap: _openGalleryPage,
               ),
             ],
           ),
@@ -917,35 +1001,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const Text('Quick Actions', style: _AdminTextStyles.sectionHeading),
           const SizedBox(height: 12),
           _QuickActionCard(
-            title: 'Mark Attendance',
-            subtitle: 'Daily student attendance',
-            icon: Icons.event_available_rounded,
+            title: 'Total Students',
+            subtitle: _loadingStudents ? 'Registered students' : '${_allStudents.length} registered students',
+            icon: Icons.school_rounded,
             color: _Palette.leafGreen,
-            onTap: _openAttendancePage,
+            onTap: () => _goToNav(2),
           ),
           const SizedBox(height: 10),
           _QuickActionCard(
-            title: 'Gallery',
-            subtitle: 'Manage photos & albums',
-            icon: Icons.photo_library_rounded,
+            title: 'Active Chats',
+            subtitle: _loadingChats ? 'Ongoing conversations' : '${_chatStudents.length} active chats',
+            icon: Icons.chat_bubble_rounded,
             color: _Palette.blueAccent,
-            onTap: _openGalleryPage,
-          ),
-          const SizedBox(height: 10),
-          _QuickActionCard(
-            title: 'Notices',
-            subtitle: 'Post announcements',
-            icon: Icons.campaign_rounded,
-            color: _Palette.amber,
-            onTap: _openNoticePage,
-          ),
-          const SizedBox(height: 10),
-          _QuickActionCard(
-            title: 'Manage Admins',
-            subtitle: 'Add or review admin access',
-            icon: Icons.admin_panel_settings_rounded,
-            color: _Palette.violet,
-            onTap: _openAdminsPage,
+            onTap: () => _goToNav(3),
           ),
         ],
       ),
@@ -1159,7 +1227,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           final request = _pendingRequests[index - 1];
           final name = request['name'] ?? 'Unknown User';
-          final phone = request['phone'] ?? '';
+          final photoUrl = request['photo_url'] as String?;
+          final reqEmail = request['email'] ?? '';
 
           return _AdminCard(
             margin: const EdgeInsets.only(bottom: 12),
@@ -1167,10 +1236,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  const CircleAvatar(
+                  CircleAvatar(
                     radius: 22,
                     backgroundColor: _Palette.primarySoft,
-                    child: Icon(Icons.person_rounded, color: _Palette.primary),
+                    backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+                    child: photoUrl == null
+                        ? const Icon(Icons.person_rounded, color: _Palette.primary)
+                        : null,
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1179,7 +1251,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       children: [
                         Text(name, style: _AdminTextStyles.cardTitle),
                         const SizedBox(height: 3),
-                        Text(phone, style: _AdminTextStyles.cardSubtitle),
+                        Text(reqEmail, style: _AdminTextStyles.cardSubtitle),
                       ],
                     ),
                   ),
@@ -1249,8 +1321,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
                 itemCount: _allowedAdmins.length,
                 itemBuilder: (context, index) {
-                  final phone = _allowedAdmins[index];
-                  final isPrimary = phone == '+918851578850';
+                  final email = _allowedAdmins[index];
+                  final isPrimary = false; // Determined by Supabase role, not hardcoded
 
                   return _AdminCard(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -1278,7 +1350,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(phone, style: _AdminTextStyles.cardTitle),
+                                Text(email, style: _AdminTextStyles.cardTitle),
                                 const SizedBox(height: 3),
                                 Text(
                                   isPrimary
@@ -1392,11 +1464,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               )
               .toList();
 
-    // Group students by type
+    // Group students by type and sort alphabetically within each group
     final Map<String, List<Map<String, dynamic>>> grouped = {};
     for (var s in filtered) {
       final type = s['student_type'] as String? ?? 'Other';
       grouped.putIfAbsent(type, () => []).add(s);
+    }
+    for (final list in grouped.values) {
+      list.sort((a, b) =>
+          (a['name'] ?? '').toString().toLowerCase().compareTo(
+              (b['name'] ?? '').toString().toLowerCase()));
     }
 
     return Column(
@@ -1471,15 +1548,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             collapsedIconColor: _Palette.textMuted,
                             children: list.map((student) {
                               final name = student['name'] ?? 'Student';
+                              final sPhotoUrl = student['photo_url'] as String?;
                               return ListTile(
-                                leading: const CircleAvatar(
+                                onTap: () {
+                                  Navigator.of(context)
+                                      .push(
+                                        MaterialPageRoute(
+                                          builder: (_) => StudentDetailPage(
+                                            student: student,
+                                            authService: _authService,
+                                          ),
+                                        ),
+                                      )
+                                      .then((_) => _loadStudents());
+                                },
+                                leading: CircleAvatar(
                                   radius: 18,
-                                  backgroundColor: _Palette.bg,
-                                  child: Icon(
-                                    Icons.person_rounded,
-                                    color: _Palette.textMuted,
-                                    size: 18,
-                                  ),
+                                  backgroundColor: _Palette.primarySoft,
+                                  backgroundImage: sPhotoUrl != null
+                                      ? NetworkImage(sPhotoUrl)
+                                      : null,
+                                  child: sPhotoUrl == null
+                                      ? const Icon(
+                                          Icons.person_rounded,
+                                          color: _Palette.primary,
+                                          size: 18,
+                                        )
+                                      : null,
                                 ),
                                 title: Text(
                                   name,
@@ -1488,26 +1583,43 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                trailing: IconButton(
-                                  icon: const Icon(
-                                    Icons.chat_bubble_rounded,
-                                    color: _Palette.primary,
-                                    size: 20,
+                                subtitle: Text(
+                                  student['email'] ?? '',
+                                  style: const TextStyle(
+                                    color: _Palette.textMuted,
+                                    fontSize: 11.5,
                                   ),
-                                  onPressed: () {
-                                    Navigator.of(context)
-                                        .push(
-                                          MaterialPageRoute(
-                                            builder: (_) => ChatPage(
-                                              studentId:
-                                                  student['id'] as String,
-                                              studentName: name,
-                                              isAdmin: true,
-                                            ),
-                                          ),
-                                        )
-                                        .then((_) => _loadChats());
-                                  },
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: _Palette.textMuted,
+                                      size: 20,
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.chat_bubble_rounded,
+                                        color: _Palette.primary,
+                                        size: 20,
+                                      ),
+                                      onPressed: () {
+                                        Navigator.of(context)
+                                            .push(
+                                              MaterialPageRoute(
+                                                builder: (_) => ChatPage(
+                                                  studentId:
+                                                      student['id'] as String,
+                                                  studentName: name,
+                                                  isAdmin: true,
+                                                ),
+                                              ),
+                                            )
+                                            .then((_) => _loadChats());
+                                      },
+                                    ),
+                                  ],
                                 ),
                               );
                             }).toList(),

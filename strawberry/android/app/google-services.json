@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "246316625668-hje2h1m3hrrqvhtj7sfi1452lbldnd6q.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.harshit.strawberry",
+            "certificate_hash": "8d037dc49e72cf9bbcd3dd7a4ecb5eaa0dc18347"
+          }
+        },
+        {
           "client_id": "246316625668-vmvh2nmoshg33mq3mt0901a2ibo8futi.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

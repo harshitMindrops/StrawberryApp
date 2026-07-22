@@ -37,6 +37,7 @@ class AttendanceMarkPage extends StatefulWidget {
 
 class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
   DateTime? _selectedDate;
+  String? _selectedCategory;
   List<Map<String, dynamic>> _students = [];
   Map<String, String> _attendanceStatus = {};
   bool _loading = true;
@@ -50,24 +51,58 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
 
   Future<void> _loadStudents() async {
     setState(() => _loading = true);
-    final students = await widget.authService.getAllStudents();
-    if (!mounted) return;
-    setState(() {
-      _students = students;
-      for (var s in _students) {
-        _attendanceStatus[s['id'] as String] = 'Present';
-      }
-      _loading = false;
-    });
+    try {
+      final students = await widget.authService.getAllStudents();
+      // Sort students alphabetically by name
+      students.sort((a, b) {
+        final nameA = (a['name'] as String? ?? '').toLowerCase();
+        final nameB = (b['name'] as String? ?? '').toLowerCase();
+        return nameA.compareTo(nameB);
+      });
+      if (!mounted) return;
+      setState(() {
+        _students = students;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadExistingAttendance() async {
+    if (_selectedDate == null || _selectedCategory == null) return;
+    setState(() => _loading = true);
+    try {
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+      final records = await widget.authService.getAttendanceForDate(dateStr);
+      if (!mounted) return;
+      setState(() {
+        _attendanceStatus.clear();
+        final existingMap = {
+          for (var r in records) r['student_id'] as String: r['status'] as String
+        };
+        final filteredStudents = _students.where((s) =>
+            (s['student_type'] as String? ?? 'Other') == _selectedCategory).toList();
+        for (var s in filteredStudents) {
+          final id = s['id'] as String;
+          _attendanceStatus[id] = existingMap[id] ?? 'Present';
+        }
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
   }
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
-      initialDate: now,
+      initialDate: _selectedDate ?? now,
       firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 1),
+      lastDate: now, // Restrict to today's date or earlier
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -82,7 +117,111 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       },
     );
     if (picked != null) {
-      setState(() => _selectedDate = picked);
+      setState(() {
+        _selectedDate = picked;
+      });
+      // Date selected, now ask for category
+      await _selectCategory();
+    }
+  }
+
+  Future<void> _selectCategory() async {
+    // Extract unique categories from students list
+    final categories = _students
+        .map((s) => s['student_type'] as String? ?? 'Other')
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (categories.isEmpty) {
+      categories.addAll(['Preschool', 'Daycare', 'Both', 'Other']);
+    }
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Select Category',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _Palette.textDark,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Choose the student category to mark attendance for',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _Palette.textMuted,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: categories.length,
+                  itemBuilder: (context, idx) {
+                    final cat = categories[idx];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: InkWell(
+                        onTap: () => Navigator.pop(context, cat),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: _Palette.bg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: _Palette.border),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.class_rounded, color: _Palette.primary, size: 20),
+                              const SizedBox(width: 12),
+                              Text(
+                                  cat,
+                                  style: const TextStyle(
+                                    color: _Palette.textDark,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              const Spacer(),
+                              const Icon(Icons.chevron_right_rounded, color: _Palette.textFaint),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected != null) {
+      setState(() {
+        _selectedCategory = selected;
+      });
+      await _loadExistingAttendance();
     }
   }
 
@@ -93,8 +232,19 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       );
       return;
     }
+    if (_selectedCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        _snack('Select a category first', success: false),
+      );
+      return;
+    }
     setState(() => _saving = true);
-    final entries = _students
+
+    // Save attendance only for the filtered category students
+    final filteredStudents = _students.where((s) =>
+        (s['student_type'] as String? ?? 'Other') == _selectedCategory).toList();
+
+    final entries = filteredStudents
         .map(
           (s) => {
             'student_id': s['id'],
@@ -107,7 +257,7 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       await widget.authService.markAttendance(dateStr, entries);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        _snack('Attendance saved', success: true),
+        _snack('Attendance saved for $_selectedCategory', success: true),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -126,16 +276,26 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
 
   ({int present, int absent, int late}) get _counts {
     int present = 0, absent = 0, late = 0;
-    for (final s in _attendanceStatus.values) {
-      if (s == 'Present') present++;
-      if (s == 'Absent') absent++;
-      if (s == 'Late') late++;
+    final filteredIds = _students
+        .where((s) => (s['student_type'] as String? ?? 'Other') == _selectedCategory)
+        .map((s) => s['id'] as String)
+        .toSet();
+
+    for (final entry in _attendanceStatus.entries) {
+      if (filteredIds.contains(entry.key)) {
+        if (entry.value == 'Present') present++;
+        if (entry.value == 'Absent') absent++;
+        if (entry.value == 'Late') late++;
+      }
     }
     return (present: present, absent: absent, late: late);
   }
 
   @override
   Widget build(BuildContext context) {
+    final filteredStudents = _students.where((s) =>
+        (s['student_type'] as String? ?? 'Other') == _selectedCategory).toList();
+
     return Scaffold(
       backgroundColor: _Palette.bg,
       appBar: AppBar(
@@ -218,10 +378,73 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+
+                      // Category picker button (shows selection state)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: _selectedDate == null ? null : _selectCategory,
+                        child: Opacity(
+                          opacity: _selectedDate == null ? 0.6 : 1.0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                            decoration: BoxDecoration(
+                              color: _Palette.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: _Palette.border),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.03),
+                                  blurRadius: 14,
+                                  offset: const Offset(0, 6),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: _Palette.primarySoft,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.class_rounded,
+                                      color: _Palette.primary, size: 18),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Student Category',
+                                          style: TextStyle(
+                                              fontSize: 11.5,
+                                              color: _Palette.textMuted,
+                                              fontWeight: FontWeight.w600)),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _selectedCategory == null
+                                            ? (_selectedDate == null ? 'Select date first' : 'Select a category')
+                                            : _selectedCategory!,
+                                        style: TextStyle(
+                                          fontSize: 15.5,
+                                          color: _selectedCategory == null ? _Palette.textMuted : _Palette.textDark,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right_rounded, color: _Palette.textFaint),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 14),
 
                       // Quick summary row
-                      if (_students.isNotEmpty)
+                      if (_selectedDate != null && _selectedCategory != null && filteredStudents.isNotEmpty)
                         Row(
                           children: [
                             Expanded(
@@ -258,128 +481,156 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
                 const SizedBox(height: 8),
 
                 Expanded(
-                  child: _students.isEmpty
+                  child: (_selectedDate == null || _selectedCategory == null)
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Container(
                                 padding: const EdgeInsets.all(22),
-                                decoration: BoxDecoration(
-                                  color: _Palette.textFaint.withOpacity(0.1),
+                                decoration: const BoxDecoration(
+                                  color: _Palette.primarySoft,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.groups_rounded, size: 46, color: _Palette.textFaint),
+                                child: const Icon(Icons.event_available_rounded, size: 46, color: _Palette.primary),
                               ),
-                              const SizedBox(height: 16),
-                              const Text('No Students Found',
+                              const SizedBox(height: 18),
+                              const Text('Setup Attendance',
                                   style: TextStyle(
-                                      fontSize: 16.5, color: _Palette.textDark, fontWeight: FontWeight.w700)),
+                                      fontSize: 17, color: _Palette.textDark, fontWeight: FontWeight.w800)),
+                              const SizedBox(height: 6),
+                              Text(
+                                  _selectedDate == null
+                                      ? 'Choose a date to begin'
+                                      : 'Select student category next',
+                                  style: const TextStyle(
+                                      fontSize: 13.5, color: _Palette.textMuted, fontWeight: FontWeight.w500)),
                             ],
                           ),
                         )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: _students.length,
-                          itemBuilder: (context, index) {
-                            final student = _students[index];
-                            final id = student['id'] as String;
-                            final name = student['name'] as String? ?? 'Student';
-                            final type = student['student_type'] as String? ?? 'Unknown';
-                            final status = _attendanceStatus[id] ?? 'Present';
-
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: _Palette.surface,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: _Palette.border),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.03),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 5),
+                      : filteredStudents.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(22),
+                                    decoration: BoxDecoration(
+                                      color: _Palette.textFaint.withOpacity(0.1),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.groups_rounded, size: 46, color: _Palette.textFaint),
                                   ),
+                                  const SizedBox(height: 16),
+                                  Text('No Students in $_selectedCategory',
+                                      style: const TextStyle(
+                                          fontSize: 16.5, color: _Palette.textDark, fontWeight: FontWeight.w700)),
                                 ],
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const CircleAvatar(
-                                        radius: 19,
-                                        backgroundColor: _Palette.bg,
-                                        child: Icon(Icons.person_rounded, color: _Palette.textMuted, size: 18),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(name,
-                                                style: const TextStyle(
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: _Palette.textDark)),
-                                            const SizedBox(height: 2),
-                                            Text(type,
-                                                style: const TextStyle(
-                                                    fontSize: 12.5,
-                                                    color: _Palette.textMuted,
-                                                    fontWeight: FontWeight.w500)),
-                                          ],
-                                        ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              itemCount: filteredStudents.length,
+                              itemBuilder: (context, index) {
+                                final student = filteredStudents[index];
+                                final id = student['id'] as String;
+                                final name = student['name'] as String? ?? 'Student';
+                                final type = student['student_type'] as String? ?? 'Unknown';
+                                final status = _attendanceStatus[id] ?? 'Present';
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: _Palette.surface,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: _Palette.border),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.03),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 5),
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 12),
-                                  _StatusSegmented(
-                                    value: status,
-                                    onChanged: (val) => setState(() => _attendanceStatus[id] = val),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const CircleAvatar(
+                                            radius: 19,
+                                            backgroundColor: _Palette.bg,
+                                            child: Icon(Icons.person_rounded, color: _Palette.textMuted, size: 18),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(name,
+                                                    style: const TextStyle(
+                                                        fontSize: 15,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: _Palette.textDark)),
+                                                const SizedBox(height: 2),
+                                                Text(type,
+                                                    style: const TextStyle(
+                                                        fontSize: 12.5,
+                                                        color: _Palette.textMuted,
+                                                        fontWeight: FontWeight.w500)),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      _StatusSegmented(
+                                        value: status,
+                                        onChanged: (val) => setState(() => _attendanceStatus[id] = val),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
+                                );
+                              },
+                            ),
                 ),
 
                 // Save button
-                Container(
-                  padding: EdgeInsets.fromLTRB(
-                    16, 12, 16, MediaQuery.of(context).padding.bottom + 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _Palette.surface,
-                    border: const Border(top: BorderSide(color: _Palette.border)),
-                  ),
-                  child: SizedBox(
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _saving ? null : _saveAttendance,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _Palette.primary,
-                        disabledBackgroundColor: _Palette.primary.withOpacity(0.6),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                if (_selectedDate != null && _selectedCategory != null && filteredStudents.isNotEmpty)
+                  Container(
+                    padding: EdgeInsets.fromLTRB(
+                      16, 12, 16, MediaQuery.of(context).padding.bottom + 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _Palette.surface,
+                      border: const Border(top: BorderSide(color: _Palette.border)),
+                    ),
+                    child: SizedBox(
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: _saving ? null : _saveAttendance,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _Palette.primary,
+                          disabledBackgroundColor: _Palette.primary.withOpacity(0.6),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: _saving
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2.4,
+                                ),
+                              )
+                            : const Text('Save Attendance',
+                                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                       ),
-                      child: _saving
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2.4,
-                              ),
-                            )
-                          : const Text('Save Attendance',
-                              style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                     ),
                   ),
-                ),
               ],
             ),
     );

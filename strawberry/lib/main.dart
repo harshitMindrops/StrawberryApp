@@ -28,6 +28,9 @@ class MyApp extends StatelessWidget {
       title: 'Strawberry',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.light,
+      theme: ThemeData.light(useMaterial3: true).copyWith(
+        scaffoldBackgroundColor: const Color(0xFFF6F6FB),
+      ),
       home: const SplashScreen(),
     );
   }
