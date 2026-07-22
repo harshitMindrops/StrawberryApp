@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
+import 'package:strawberry/features/auth/push_notification_service.dart';
+
 
 /// ---------------------------------------------------------------------
 /// Design tokens — kept consistent with the rest of the admin panel
@@ -50,11 +52,26 @@ class _NoticeAdminPageState extends State<NoticeAdminPage> {
   List<Map<String, dynamic>> _historyNotices = [];
   bool _loadingHistory = true;
 
+  List<String> _categories = [];
+
   @override
   void initState() {
     super.initState();
     _loadStudents();
     _loadHistory();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final list = await widget.authService.getCategories();
+      if (!mounted) return;
+      setState(() {
+        _categories = list;
+      });
+    } catch (e) {
+      // Ignore
+    }
   }
 
   Future<void> _loadStudents() async {
@@ -99,6 +116,17 @@ class _NoticeAdminPageState extends State<NoticeAdminPage> {
         specificStudentId: specificId,
         category: category,
       );
+
+      // Send system push notifications to matching audience devices asynchronously
+      PushNotificationService().sendNoticeNotification(
+        title: title,
+        body: body,
+        audience: audience,
+        specificStudentId: specificId,
+      ).catchError((err) {
+        print("Push notification dispatch failed: $err");
+      });
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(_snack('Notice created', success: true));
       _titleController.clear();
@@ -297,12 +325,10 @@ class _NoticeAdminPageState extends State<NoticeAdminPage> {
             dropdownColor: _Palette.surface,
             style: const TextStyle(color: _Palette.textDark, fontSize: 15, fontWeight: FontWeight.w600),
             decoration: _fieldDecoration(label: 'Audience', icon: Icons.groups_rounded),
-            items: const <DropdownMenuItem<String>>[
-              DropdownMenuItem<String>(value: 'All', child: Text('All')),
-              DropdownMenuItem<String>(value: 'Preschool', child: Text('Preschool')),
-              DropdownMenuItem<String>(value: 'Daycare', child: Text('Daycare')),
-              DropdownMenuItem<String>(value: 'Both', child: Text('Both')),
-              DropdownMenuItem<String>(value: 'Specific', child: Text('Specific Student')),
+            items: [
+              const DropdownMenuItem<String>(value: 'All', child: Text('All')),
+              ..._categories.map((cat) => DropdownMenuItem<String>(value: cat, child: Text(cat))),
+              const DropdownMenuItem<String>(value: 'Specific', child: Text('Specific Student')),
             ],
             onChanged: (v) => setState(() => _audience = v ?? 'All'),
           ),

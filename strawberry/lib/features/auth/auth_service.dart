@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:strawberry/features/auth/push_notification_service.dart';
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
@@ -78,6 +79,10 @@ class AuthService {
           .select()
           .eq('id', userId)
           .maybeSingle();
+      if (data != null) {
+        // Trigger register device token asynchronously
+        unawaited(PushNotificationService().registerDeviceToken());
+      }
       return data;
     } catch (e) {
       return null;
@@ -123,8 +128,13 @@ class AuthService {
     };
 
     await _supabaseClient.from('profiles').insert(profileData).select();
+    
+    // Trigger register device token asynchronously
+    unawaited(PushNotificationService().registerDeviceToken());
+
     return profileData;
   }
+
 
   // Get list of pending student approval requests (Admins only)
   Future<List<Map<String, dynamic>>> getPendingRequests() async {
@@ -367,6 +377,145 @@ class AuthService {
   // Delete a notice
   Future<void> deleteNotice(int id) async {
     await _supabaseClient.from('notices').delete().eq('id', id);
+  }
+
+  // ----- Category Methods -----
+
+  // Fetch student categories from the database.
+  // Fallbacks to default categories if the fetch fails or table doesn't exist.
+  Future<List<String>> getCategories() async {
+    try {
+      final response = await _supabaseClient
+          .from('student_categories')
+          .select('name')
+          .order('name', ascending: true);
+      
+      final list = List<String>.from(
+        (response as List).map((e) => e['name'] as String),
+      );
+      if (list.isEmpty) {
+        return ['Playgroup', 'Nursery', 'LKG', 'UKG', 'Tution'];
+      }
+      return list;
+    } catch (e) {
+      return ['Playgroup', 'Nursery', 'LKG', 'UKG', 'Tution'];
+    }
+  }
+
+  // Add a new student category
+  Future<void> addCategory(String name) async {
+    await _supabaseClient.from('student_categories').insert({'name': name});
+  }
+
+  // Delete a student category
+  Future<void> deleteCategory(String name) async {
+    await _supabaseClient.from('student_categories').delete().eq('name', name);
+  }
+
+  // ----- Student/Admin Removal Methods -----
+
+  // Remove a student (Primary Admin only)
+  Future<void> removeStudent(String uid) async {
+    // 1. Delete attendance records for this student
+    await _supabaseClient.from('attendance').delete().eq('student_id', uid);
+
+    // 2. Delete chat messages involving this student
+    await _supabaseClient
+        .from('messages')
+        .delete()
+        .or('sender_id.eq.$uid,receiver_id.eq.$uid');
+
+    // 3. Delete student profile
+    await _supabaseClient.from('profiles').delete().eq('id', uid);
+  }
+
+  // Remove a co-admin (Primary Admin only)
+  Future<void> removeAdmin(String email) async {
+    // Prevent primary admin deletion
+    if (email.trim().toLowerCase() == 'dev.harshitcreations@gmail.com') {
+      throw Exception('Cannot delete the primary administrator.');
+    }
+
+    // 1. Remove from allowed_admins
+    await _supabaseClient.from('allowed_admins').delete().eq('email', email);
+
+    // 2. Delete profile from profiles
+    await _supabaseClient.from('profiles').delete().eq('email', email);
+  }
+
+  // ----- Notice Board Methods for Students -----
+
+  // Fetch notices filtered for student (General notices + category notices + specific student notices)
+  Future<List<Map<String, dynamic>>> getNoticesForStudent(
+      String uid, String? studentType) async {
+    String orFilter = 'target_audience.eq.All';
+    if (studentType != null && studentType.isNotEmpty) {
+      orFilter += ',target_audience.eq.$studentType';
+    }
+    if (uid.isNotEmpty) {
+      orFilter += ',and(target_audience.eq.Specific,specific_student_id.eq.$uid)';
+    }
+
+    final response = await _supabaseClient
+        .from('notices')
+        .select('*')
+        .or(orFilter)
+        .order('created_at', ascending: false);
+
+    return List<Map<String, dynamic>>.from(response as List);
+  }
+
+  // Listen to Postgres changes for notices targeted at the student in real-time
+  Stream<List<Map<String, dynamic>>> getNoticesRealtimeStream(
+      String uid, String? studentType) {
+    final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
+    List<Map<String, dynamic>> noticesList = [];
+
+    bool isNoticeForStudent(Map<String, dynamic> notice) {
+      final audience = (notice['target_audience'] ?? 'All') as String;
+      final specificId = notice['specific_student_id'] as String?;
+      if (audience == 'All') return true;
+      if (studentType != null && audience == studentType) return true;
+      if (audience == 'Specific' && specificId == uid) return true;
+      return false;
+    }
+
+    Future<void> fetchInitial() async {
+      try {
+        final list = await getNoticesForStudent(uid, studentType);
+        noticesList = list;
+        if (!controller.isClosed) controller.add(List.from(noticesList));
+      } catch (e) {
+        print('NoticesStream fetchInitial error: $e');
+      }
+    }
+
+    fetchInitial();
+
+    final channelName = 'notices_realtime';
+    final channel = _supabaseClient.channel(channelName);
+
+    channel
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notices',
+          callback: (payload) {
+            final newRow = payload.newRecord;
+            if (isNoticeForStudent(newRow)) {
+              noticesList.insert(0, Map<String, dynamic>.from(newRow));
+              if (!controller.isClosed) controller.add(List.from(noticesList));
+            }
+          },
+        )
+        .subscribe();
+
+    controller.onCancel = () {
+      _supabaseClient.removeChannel(channel);
+      controller.close();
+    };
+
+    return controller.stream;
   }
 
   // ----- Gallery Methods -----

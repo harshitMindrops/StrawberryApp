@@ -43,6 +43,9 @@ dependencies:
   flutter_image_compress: ^2.3.0
   intl: ^0.20.3
   google_sign_in: ^6.2.2
+  firebase_messaging: ^16.4.1
+  flutter_local_notifications: ^17.2.2
+  googleapis_auth: ^1.6.0
 
 dev_dependencies:
   flutter_test:

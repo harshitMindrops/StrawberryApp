@@ -5,6 +5,8 @@ import 'package:strawberry/features/dashboard/student/attendance_page.dart';
 import 'package:strawberry/features/dashboard/student/gallery_page.dart';
 import 'package:strawberry/features/dashboard/student/notice_board_page.dart';
 import 'package:strawberry/features/chat/chat_page.dart';
+import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,6 +19,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _authService = AuthService();
   Map<String, dynamic>? _profile;
   bool _loading = true;
+
+  StreamSubscription? _noticesSubscription;
+  int _unreadNoticesCount = 0;
 
   static const Color _bg = Color(0xFFF6F6FB);
   static const Color _surface = Colors.white;
@@ -33,6 +38,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadProfile();
   }
 
+  @override
+  void dispose() {
+    _noticesSubscription?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadProfile() async {
     setState(() => _loading = true);
     try {
@@ -41,9 +52,176 @@ class _HomeScreenState extends State<HomeScreen> {
         _profile = profile;
         _loading = false;
       });
+      _loadUnreadNoticesCount();
+      _subscribeToNotices();
     } catch (e) {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadUnreadNoticesCount() async {
+    final uid = _authService.currentUserId ?? '';
+    final studentType = _profile?['student_type'] as String?;
+    if (uid.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastViewedStr = prefs.getString('last_viewed_notices_time_$uid');
+      final DateTime lastViewed = lastViewedStr != null
+          ? DateTime.parse(lastViewedStr)
+          : DateTime.fromMillisecondsSinceEpoch(0);
+
+      final notices = await _authService.getNoticesForStudent(uid, studentType);
+      int unread = 0;
+      for (var n in notices) {
+        final createdStr = n['created_at'] as String?;
+        if (createdStr != null) {
+          final created = DateTime.tryParse(createdStr);
+          if (created != null && created.isAfter(lastViewed)) {
+            unread++;
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _unreadNoticesCount = unread;
+        });
+      }
+    } catch (e) {
+      print('Error loading unread notices count: $e');
+    }
+  }
+
+  void _subscribeToNotices() {
+    _noticesSubscription?.cancel();
+    final uid = _authService.currentUserId ?? '';
+    final studentType = _profile?['student_type'] as String?;
+    if (uid.isEmpty) return;
+
+    bool isFirstEmit = true;
+    List<int> initialIds = [];
+
+    _noticesSubscription = _authService
+        .getNoticesRealtimeStream(uid, studentType)
+        .listen((notices) {
+      final currentIds = notices.map((n) => n['id'] as int).toList();
+      
+      if (isFirstEmit) {
+        initialIds = currentIds;
+        isFirstEmit = false;
+        return;
+      }
+
+      // Check for new notices
+      for (var notice in notices) {
+        final id = notice['id'] as int;
+        if (!initialIds.contains(id)) {
+          initialIds.add(id);
+          _showInAppNotification(notice);
+          _loadUnreadNoticesCount();
+        }
+      }
+    });
+  }
+
+  void _showInAppNotification(Map<String, dynamic> notice) {
+    if (!mounted) return;
+    final title = notice['title'] ?? 'New Notice';
+    final body = notice['body'] ?? '';
+    final category = notice['category'] ?? 'General';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _primary.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.campaign_rounded, color: _primary, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'New Announcement!',
+                style: TextStyle(
+                  color: _textDark,
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _primarySoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                category,
+                style: const TextStyle(
+                  color: _primary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: const TextStyle(
+                color: _textDark,
+                fontSize: 15.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              body,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _textMuted,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(foregroundColor: _textMuted),
+            child: const Text('Dismiss', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NoticeBoardPage()),
+              ).then((_) => _loadUnreadNoticesCount());
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('View Board', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -242,7 +420,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             MaterialPageRoute(
                               builder: (_) => const NoticeBoardPage(),
                             ),
-                          ),
+                          ).then((_) => _loadUnreadNoticesCount()),
+                          badgeCount: _unreadNoticesCount,
                         ),
                         _buildNavCard(
                           icon: Icons.forum_rounded,
@@ -337,6 +516,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
+    int badgeCount = 0,
   }) {
     return InkWell(
       onTap: onTap,
@@ -349,42 +529,73 @@ class _HomeScreenState extends State<HomeScreen> {
           border: Border.all(color: _border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
+              color: Colors.black.withOpacity(0.02),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: color, size: 24),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: color, size: 24),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: _textDark,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: _textMuted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                color: _textDark,
+            if (badgeCount > 0)
+              Positioned(
+                top: -4,
+                right: -4,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 20,
+                    minHeight: 20,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '$badgeCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                fontSize: 11,
-                color: _textMuted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
           ],
         ),
       ),

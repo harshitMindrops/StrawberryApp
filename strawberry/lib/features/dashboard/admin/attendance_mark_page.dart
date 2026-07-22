@@ -126,15 +126,19 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
   }
 
   Future<void> _selectCategory() async {
-    // Extract unique categories from students list
-    final categories = _students
-        .map((s) => s['student_type'] as String? ?? 'Other')
-        .where((c) => c.isNotEmpty)
-        .toSet()
-        .toList();
-
+    List<String> categories = [];
+    try {
+      categories = await widget.authService.getCategories();
+    } catch (_) {}
     if (categories.isEmpty) {
-      categories.addAll(['Preschool', 'Daycare', 'Both', 'Other']);
+      categories = _students
+          .map((s) => s['student_type'] as String? ?? 'Other')
+          .where((c) => c.isNotEmpty)
+          .toSet()
+          .toList();
+      if (categories.isEmpty) {
+        categories.addAll(['Playgroup', 'Nursery', 'LKG', 'UKG', 'Tution']);
+      }
     }
 
     final selected = await showModalBottomSheet<String>(

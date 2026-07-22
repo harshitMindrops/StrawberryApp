@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NoticeBoardPage extends StatefulWidget {
   const NoticeBoardPage({super.key});
@@ -30,13 +31,19 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
 
   Future<void> _loadNotices() async {
     setState(() => _loading = true);
-    final uid = _authService.currentUserId;
+    final uid = _authService.currentUserId ?? '';
     try {
-      final all = await _authService.getNotices(audience: 'All');
-      final specific = await _authService.getStudentSpecificNotices(uid ?? '');
+      final profile = await _authService.getCurrentProfile();
+      final studentType = profile?['student_type'] as String?;
+      final list = await _authService.getNoticesForStudent(uid, studentType);
+
+      // Save last read timestamp to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('last_viewed_notices_time_$uid', DateTime.now().toIso8601String());
+
       if (!mounted) return;
       setState(() {
-        _notices = [...all, ...specific];
+        _notices = list;
         _loading = false;
       });
     } catch (e) {

@@ -33,10 +33,25 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
   static const _success = Color(0xFF22B07D);
   static const _danger = Color(0xFFEF4949);
 
+  List<String> _categories = [];
+
   @override
   void initState() {
     super.initState();
     _student = Map<String, dynamic>.from(widget.student);
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final cats = await widget.authService.getCategories();
+      if (!mounted) return;
+      setState(() {
+        _categories = cats;
+      });
+    } catch (e) {
+      // Ignore
+    }
   }
 
   List<String> get _paidMonths =>
@@ -221,16 +236,13 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
   // ── Upgrade student sheet ────────────────────────────────────────────
   void _openUpgradeSheet() {
     String? selectedType = _student['student_type'] as String?;
-    final customTypeController = TextEditingController(
-      text: (selectedType != null &&
-              !['Preschool', 'Daycare', 'Both'].contains(selectedType))
-          ? selectedType
-          : '',
-    );
-    if (selectedType != null &&
-        !['Preschool', 'Daycare', 'Both'].contains(selectedType)) {
-      selectedType = 'Other';
+
+    // Ensure the current category is represented in the dropdown selection, even if it was deleted.
+    List<String> dropdownItems = List.from(_categories);
+    if (selectedType != null && selectedType.isNotEmpty && !dropdownItems.contains(selectedType)) {
+      dropdownItems.add(selectedType);
     }
+
     final feesController = TextEditingController(
       text: (_student['fees'] ?? 0).toString(),
     );
@@ -282,31 +294,16 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     decoration: _inputDecor(
                         label: 'Student Type',
                         icon: Icons.school_rounded),
-                    items: const [
-                      DropdownMenuItem(
-                          value: 'Preschool', child: Text('Preschool')),
-                      DropdownMenuItem(
-                          value: 'Daycare', child: Text('Daycare')),
-                      DropdownMenuItem(value: 'Both', child: Text('Both')),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
-                    ],
+                    items: dropdownItems.map((cat) {
+                      return DropdownMenuItem<String>(
+                        value: cat,
+                        child: Text(cat),
+                      );
+                    }).toList(),
                     onChanged: (v) => setSheet(() => selectedType = v),
                     validator: (v) =>
                         (v == null || v.isEmpty) ? 'Select type' : null,
                   ),
-                  if (selectedType == 'Other') ...[
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: customTypeController,
-                      style: const TextStyle(color: _textDark),
-                      decoration: _inputDecor(
-                          label: 'Custom Type', icon: Icons.edit_rounded),
-                      validator: (v) => (selectedType == 'Other' &&
-                              (v == null || v.trim().isEmpty))
-                          ? 'Enter custom type'
-                          : null,
-                    ),
-                  ],
                   const SizedBox(height: 14),
                   TextFormField(
                     controller: feesController,
@@ -324,9 +321,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     child: ElevatedButton(
                       onPressed: () async {
                         if (!formKey.currentState!.validate()) return;
-                        final type = selectedType == 'Other'
-                            ? customTypeController.text.trim()
-                            : selectedType!;
+                        final type = selectedType!;
                         final fees =
                             double.tryParse(feesController.text.trim()) ?? 0.0;
                         Navigator.pop(ctx);
@@ -352,6 +347,57 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         });
       },
     );
+  }
+
+  Future<void> _removeStudent() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove Student?',
+            style: TextStyle(color: _textDark, fontWeight: FontWeight.w800)),
+        content: Text(
+          'Are you sure you want to permanently remove ${_student['name']}?\n\nThis will delete all their attendance records, chat messages, and student account details. This action cannot be undone.',
+          style: const TextStyle(color: _textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: _textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _danger,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+    setState(() => _saving = true);
+    try {
+      await widget.authService.removeStudent(_student['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snack('Successfully removed ${_student['name']}', success: true),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snack('Failed to remove student. Try again.', success: false),
+        );
+      }
+    }
   }
 
   Future<void> _doUpgrade(String type, double fees) async {
@@ -526,6 +572,12 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
               ),
             ),
             actions: [
+              if (widget.authService.currentUserEmail == 'dev.harshitcreations@gmail.com')
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.white),
+                  tooltip: 'Remove Student',
+                  onPressed: _saving ? null : _removeStudent,
+                ),
               if (_saving)
                 const Padding(
                   padding: EdgeInsets.all(16),
@@ -533,7 +585,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
-                        color: _primary, strokeWidth: 2),
+                        color: Colors.white, strokeWidth: 2),
                   ),
                 ),
             ],

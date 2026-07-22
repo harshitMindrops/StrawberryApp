@@ -6,6 +6,8 @@ import 'attendance_mark_page.dart';
 import 'gallery_admin_page.dart';
 import 'notice_admin_page.dart';
 import 'student_detail_page.dart';
+import 'categories_admin_page.dart';
+import 'manage_admins_page.dart';
 import 'package:strawberry/features/chat/chat_page.dart';
 
 /// ---------------------------------------------------------------------
@@ -71,14 +73,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _navIndex = 0;
 
   List<Map<String, dynamic>> _pendingRequests = [];
-  List<String> _allowedAdmins = [];
   bool _loadingRequests = true;
-  bool _loadingAdmins = true;
 
   List<Map<String, dynamic>> _allStudents = [];
   bool _loadingStudents = true;
   List<Map<String, dynamic>> _chatStudents = [];
   bool _loadingChats = true;
+
+  List<String> _categories = [];
 
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -91,9 +93,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _loadData() async {
     _loadRequests();
-    _loadAdmins();
     _loadStudents();
     _loadChats();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final list = await _authService.getCategories();
+      if (!mounted) return;
+      setState(() {
+        _categories = list;
+      });
+    } catch (e) {
+      // Ignore
+    }
   }
 
   Future<void> _loadStudents() async {
@@ -141,20 +155,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  Future<void> _loadAdmins() async {
-    setState(() => _loadingAdmins = true);
-    try {
-      final admins = await _authService.getAllowedAdmins();
-      if (!mounted) return;
-      setState(() {
-        _allowedAdmins = admins;
-        _loadingAdmins = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _loadingAdmins = false);
-    }
-  }
+
 
   Future<void> _logout() async {
     await _authService.logout();
@@ -198,10 +199,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void _openAdminsPage() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => _buildAdminsPage()));
+    if (_authService.currentUserEmail != 'dev.harshitcreations@gmail.com') return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ManageAdminsPage(authService: _authService),
+      ),
+    );
   }
+
+  void _openCategoriesPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CategoriesAdminPage(authService: _authService),
+      ),
+    ).then((_) {
+      _loadCategories();
+      _loadStudents();
+    });
+  }
+
+
 
   void _goToNav(int index) => setState(() => _navIndex = index);
 
@@ -213,7 +230,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final uid = request['id'] ?? '';
 
     String? _selectedStudentType;
-    final customTypeController = TextEditingController();
     final feesController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
@@ -357,18 +373,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         label: 'Student Type',
                         icon: Icons.school_rounded,
                       ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'Preschool',
-                          child: Text('Preschool'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Daycare',
-                          child: Text('Daycare'),
-                        ),
-                        DropdownMenuItem(value: 'Both', child: Text('Both')),
-                        DropdownMenuItem(value: 'Other', child: Text('Other')),
-                      ],
+                      items: _categories.map((cat) {
+                        return DropdownMenuItem<String>(
+                          value: cat,
+                          child: Text(cat),
+                        );
+                      }).toList(),
                       onChanged: (value) {
                         setModalState(() {
                           _selectedStudentType = value;
@@ -381,26 +391,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         return null;
                       },
                     ),
-                    // If 'Other' is selected, show custom input
-                    if (_selectedStudentType == 'Other')
-                      Padding(
-                        padding: const EdgeInsets.only(top: 14),
-                        child: TextFormField(
-                          controller: customTypeController,
-                          style: const TextStyle(color: _Palette.textDark),
-                          decoration: _adminInputDecoration(
-                            label: 'Custom Student Type',
-                            icon: Icons.edit_rounded,
-                          ),
-                          validator: (value) {
-                            if (_selectedStudentType == 'Other' &&
-                                (value == null || value.trim().isEmpty)) {
-                              return 'Please specify custom student type';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
                     const SizedBox(height: 14),
 
                     // Fees
@@ -427,9 +417,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         onPressed: () async {
                           if (!formKey.currentState!.validate()) return;
 
-                          final type = _selectedStudentType == 'Other'
-                              ? customTypeController.text.trim()
-                              : _selectedStudentType!;
+                          final type = _selectedStudentType!;
                           final fees =
                               double.tryParse(feesController.text.trim()) ??
                               0.0;
@@ -608,171 +596,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ---------------------------------------------------------------------
-  // Add admin dialog
-  // ---------------------------------------------------------------------
-  void _openAddAdminDialog() {
-    final emailController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: _Palette.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [_Palette.primary, _Palette.accentPeach],
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.person_add_alt_1_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Add Allowed Admin',
-                  style: TextStyle(
-                    color: _Palette.textDark,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Enter the email address that will be granted administrator access upon registration.',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: _Palette.textMuted,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                TextFormField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  style: const TextStyle(
-                    color: _Palette.textDark,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'Email Address',
-                    labelStyle: const TextStyle(
-                      color: _Palette.textMuted,
-                      fontSize: 14,
-                    ),
-                    prefixIcon: const Icon(
-                      Icons.email_rounded,
-                      color: _Palette.primary,
-                      size: 20,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: _Palette.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(
-                        color: _Palette.primary,
-                        width: 1.6,
-                      ),
-                    ),
-                    errorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: _Palette.danger),
-                    ),
-                    filled: true,
-                    fillColor: _Palette.bg,
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter an email address';
-                    }
-                    final emailRegex = RegExp(
-                      r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$',
-                    );
-                    if (!emailRegex.hasMatch(value.trim())) {
-                      return 'Enter a valid email address';
-                    }
-                    return null;
-                  },
-                ),
-              ],
-            ),
-          ),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              style: TextButton.styleFrom(foregroundColor: _Palette.textMuted),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                final email = emailController.text.trim();
-
-                try {
-                  await _authService.addAdmin(email);
-                  if (!context.mounted) return;
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    _adminSnackBar(
-                      'Granted Admin rights to $email',
-                      success: true,
-                    ),
-                  );
-                  _loadAdmins();
-                } catch (e) {
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    _adminSnackBar(
-                      'Failed to add admin. Please check permission.',
-                      success: false,
-                    ),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _Palette.primary,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: const Text(
-                'Add Admin',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   // ---------------------------------------------------------------------
   // Build
@@ -1138,12 +962,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
         const SizedBox(height: 10),
         _QuickActionCard(
-          title: 'Manage Admins',
-          subtitle: 'Add or review admin access',
-          icon: Icons.admin_panel_settings_rounded,
-          color: _Palette.violet,
-          onTap: _openAdminsPage,
+          title: 'Manage Categories',
+          subtitle: 'Create, add or remove categories',
+          icon: Icons.category_rounded,
+          color: _Palette.primary,
+          onTap: _openCategoriesPage,
         ),
+        if (_authService.currentUserEmail == 'dev.harshitcreations@gmail.com') ...[
+          const SizedBox(height: 10),
+          _QuickActionCard(
+            title: 'Manage Admins',
+            subtitle: 'Add or review admin access',
+            icon: Icons.admin_panel_settings_rounded,
+            color: _Palette.violet,
+            onTap: _openAdminsPage,
+          ),
+        ],
         const SizedBox(height: 10),
         _QuickActionCard(
           title: 'Log Out',
@@ -1290,98 +1124,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   // ---------------------------------------------------------------------
   // Admins page (pushed as a full screen from Home / More)
   // ---------------------------------------------------------------------
-  Widget _buildAdminsPage() {
-    return Scaffold(
-      backgroundColor: _Palette.bg,
-      appBar: AppBar(
-        title: const Text('Manage Admins', style: _AdminTextStyles.title),
-        backgroundColor: _Palette.surface,
-        surfaceTintColor: Colors.transparent,
-        foregroundColor: _Palette.textDark,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        shape: const Border(
-          bottom: BorderSide(color: _Palette.border, width: 1),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openAddAdminDialog,
-        backgroundColor: _Palette.primary,
-        elevation: 2,
-        child: const Icon(Icons.add_rounded, color: Colors.white),
-      ),
-      body: _loadingAdmins
-          ? const Center(
-              child: CircularProgressIndicator(color: _Palette.primary),
-            )
-          : RefreshIndicator(
-              onRefresh: _loadAdmins,
-              color: _Palette.primary,
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: _allowedAdmins.length,
-                itemBuilder: (context, index) {
-                  final email = _allowedAdmins[index];
-                  final isPrimary = false; // Determined by Supabase role, not hardcoded
-
-                  return _AdminCard(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 22,
-                            backgroundColor: isPrimary
-                                ? _Palette.amber.withOpacity(0.15)
-                                : _Palette.bg,
-                            child: Icon(
-                              Icons.admin_panel_settings_rounded,
-                              color: isPrimary
-                                  ? _Palette.amber
-                                  : _Palette.textMuted,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(email, style: _AdminTextStyles.cardTitle),
-                                const SizedBox(height: 3),
-                                Text(
-                                  isPrimary
-                                      ? 'Primary Administrator'
-                                      : 'Co-Administrator',
-                                  style: TextStyle(
-                                    color: isPrimary
-                                        ? _Palette.amber
-                                        : _Palette.textMuted,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (isPrimary)
-                            const Icon(
-                              Icons.verified_rounded,
-                              color: _Palette.amber,
-                              size: 20,
-                            ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-    );
-  }
+  // _buildAdminsPage removed — replaced by ManageAdminsPage StatefulWidget
 
   // ---------------------------------------------------------------------
   // Students tab
@@ -1464,16 +1207,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
               )
               .toList();
 
-    // Group students by type and sort alphabetically within each group
+    // Group students by type
     final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (var cat in _categories) {
+      grouped[cat] = [];
+    }
     for (var s in filtered) {
       final type = s['student_type'] as String? ?? 'Other';
-      grouped.putIfAbsent(type, () => []).add(s);
+      if (!grouped.containsKey(type)) {
+        grouped[type] = [];
+      }
+      grouped[type]!.add(s);
     }
     for (final list in grouped.values) {
       list.sort((a, b) =>
           (a['name'] ?? '').toString().toLowerCase().compareTo(
               (b['name'] ?? '').toString().toLowerCase()));
+    }
+
+    final allKeys = [..._categories];
+    for (final key in grouped.keys) {
+      if (!allKeys.contains(key)) {
+        allKeys.add(key);
+      }
     }
 
     return Column(
@@ -1486,7 +1242,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           child: RefreshIndicator(
             onRefresh: _loadStudents,
             color: _Palette.primary,
-            child: grouped.isEmpty
+            child: allKeys.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
@@ -1503,8 +1259,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   )
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    children: grouped.keys.map((type) {
-                      final list = grouped[type]!;
+                    children: allKeys.map((type) {
+                      final list = grouped[type] ?? [];
                       return _AdminCard(
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: EdgeInsets.zero,
@@ -1546,11 +1302,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             ),
                             iconColor: _Palette.primary,
                             collapsedIconColor: _Palette.textMuted,
-                            children: list.map((student) {
-                              final name = student['name'] ?? 'Student';
-                              final sPhotoUrl = student['photo_url'] as String?;
-                              return ListTile(
-                                onTap: () {
+                            children: list.isEmpty
+                                ? [
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(vertical: 16),
+                                      child: Center(
+                                        child: Text(
+                                          'No students in this category',
+                                          style: TextStyle(
+                                            color: _Palette.textMuted,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  ]
+                                : list.map<Widget>((student) {
+                                    final name = student['name'] ?? 'Student';
+                                    final sPhotoUrl = student['photo_url'] as String?;
+                                    return ListTile(
+                                      onTap: () {
                                   Navigator.of(context)
                                       .push(
                                         MaterialPageRoute(
