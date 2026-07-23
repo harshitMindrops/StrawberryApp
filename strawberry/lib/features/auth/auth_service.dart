@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -363,28 +364,95 @@ class AuthService {
     return List<Map<String, dynamic>>.from(response as List);
   }
 
-  // Create a new notice
+  // Create a new notice.
+  //
+  // scheduleType:
+  //   'now'    -> dispatched immediately (default, unchanged behaviour)
+  //   'once'   -> dispatched once at `scheduledAt`
+  //   'daily'  -> dispatched every day at `recurrenceTime`
+  //   'weekly' -> dispatched every week on `recurrenceDays` (ISO weekday 1=Mon..7=Sun) at `recurrenceTime`
+  //
+  // For 'once'/'daily'/'weekly' the row is inserted with status 'pending' and
+  // next_run_at set; the `dispatch-scheduled-notices` Edge Function (driven by
+  // pg_cron) picks it up and sends the push when it's due.
   Future<void> createNotice({
     required String title,
     required String body,
     required String audience,
     String? specificStudentId,
     String category = 'General',
+    String scheduleType = 'now',
+    DateTime? scheduledAt,
+    TimeOfDay? recurrenceTime,
+    List<int>? recurrenceDays, // ISO weekday: 1=Mon .. 7=Sun
+    DateTime? recurrenceEndDate,
   }) async {
-    final data = {
+    final data = <String, dynamic>{
       'title': title,
       'body': body,
       'target_audience': audience,
       'category': category,
       'created_at': DateTime.now().toIso8601String(),
+      'schedule_type': scheduleType,
+      'status': scheduleType == 'now' ? 'sent' : 'pending',
     };
+    if (scheduleType == 'now') {
+      // Marks it as already-delivered so students see it right away, same as
+      // a scheduled notice becomes visible only once the dispatcher stamps this.
+      data['last_sent_at'] = DateTime.now().toUtc().toIso8601String();
+    }
     if (audience == 'Specific' && specificStudentId != null) {
       data['specific_student_id'] = specificStudentId;
     }
+
+    if (scheduleType == 'once' && scheduledAt != null) {
+      data['next_run_at'] = scheduledAt.toUtc().toIso8601String();
+    } else if (scheduleType == 'daily' && recurrenceTime != null) {
+      data['recurrence_time'] =
+          '${recurrenceTime.hour.toString().padLeft(2, '0')}:${recurrenceTime.minute.toString().padLeft(2, '0')}:00';
+      data['next_run_at'] = _nextDailyRun(recurrenceTime).toUtc().toIso8601String();
+      if (recurrenceEndDate != null) {
+        data['recurrence_end_date'] = recurrenceEndDate.toIso8601String().split('T').first;
+      }
+    } else if (scheduleType == 'weekly' && recurrenceTime != null && recurrenceDays != null && recurrenceDays.isNotEmpty) {
+      data['recurrence_time'] =
+          '${recurrenceTime.hour.toString().padLeft(2, '0')}:${recurrenceTime.minute.toString().padLeft(2, '0')}:00';
+      data['recurrence_days'] = recurrenceDays;
+      data['next_run_at'] = _nextWeeklyRun(recurrenceTime, recurrenceDays).toUtc().toIso8601String();
+      if (recurrenceEndDate != null) {
+        data['recurrence_end_date'] = recurrenceEndDate.toIso8601String().split('T').first;
+      }
+    }
+
     await _supabaseClient.from('notices').insert(data);
   }
 
-  // Fetch all notices for admin review
+  // Next occurrence (today if the time hasn't passed yet, else tomorrow) for a daily notice.
+  DateTime _nextDailyRun(TimeOfDay time) {
+    final now = DateTime.now();
+    var next = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+    if (!next.isAfter(now)) {
+      next = next.add(const Duration(days: 1));
+    }
+    return next;
+  }
+
+  // Next occurrence for a weekly notice given a set of ISO weekdays (1=Mon..7=Sun).
+  DateTime _nextWeeklyRun(TimeOfDay time, List<int> isoWeekdays) {
+    final now = DateTime.now();
+    for (int i = 0; i <= 7; i++) {
+      final candidateDate = now.add(Duration(days: i));
+      final candidate = DateTime(
+          candidateDate.year, candidateDate.month, candidateDate.day, time.hour, time.minute);
+      if (isoWeekdays.contains(candidate.weekday) && candidate.isAfter(now)) {
+        return candidate;
+      }
+    }
+    // Fallback: shouldn't normally happen since we scan a full week ahead.
+    return now.add(const Duration(days: 7));
+  }
+
+  // Fetch all notices for admin review (includes pending/scheduled/recurring ones)
   Future<List<Map<String, dynamic>>> getSentNotices() async {
     final response = await _supabaseClient
         .from('notices')
@@ -396,6 +464,14 @@ class AuthService {
   // Delete a notice
   Future<void> deleteNotice(int id) async {
     await _supabaseClient.from('notices').delete().eq('id', id);
+  }
+
+  // Cancel a pending scheduled/recurring notice without deleting its history row.
+  Future<void> cancelScheduledNotice(int id) async {
+    await _supabaseClient
+        .from('notices')
+        .update({'status': 'cancelled'})
+        .eq('id', id);
   }
 
   // ----- Category Methods -----
@@ -479,16 +555,24 @@ class AuthService {
         .from('notices')
         .select('*')
         .or(orFilter)
-        .order('created_at', ascending: false);
+        .not('last_sent_at', 'is', null) // hide scheduled/recurring notices until they've actually been dispatched
+        .order('last_sent_at', ascending: false);
 
     return List<Map<String, dynamic>>.from(response as List);
   }
 
-  // Listen to Postgres changes for notices targeted at the student in real-time
+  // Listen to Postgres changes for notices targeted at the student in real-time.
+  // Only notices that have actually been dispatched (last_sent_at set) are
+  // surfaced — a scheduled/recurring notice sits invisible until the
+  // dispatch-scheduled-notices Edge Function stamps last_sent_at on it.
   Stream<List<Map<String, dynamic>>> getNoticesRealtimeStream(
       String uid, String? studentType) {
     final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
     List<Map<String, dynamic>> noticesList = [];
+    // Tracks the last_sent_at we've already shown for each notice id, so a
+    // recurring notice firing again (same id, new last_sent_at) is detected
+    // as a fresh delivery instead of being silently ignored.
+    final Map<int, String?> _lastKnownSentAt = {};
 
     bool isNoticeForStudent(Map<String, dynamic> notice) {
       final audience = (notice['target_audience'] ?? 'All') as String;
@@ -499,10 +583,15 @@ class AuthService {
       return false;
     }
 
+    bool isDispatched(Map<String, dynamic> notice) => notice['last_sent_at'] != null;
+
     Future<void> fetchInitial() async {
       try {
         final list = await getNoticesForStudent(uid, studentType);
         noticesList = list;
+        for (final n in list) {
+          _lastKnownSentAt[n['id'] as int] = n['last_sent_at'] as String?;
+        }
         if (!controller.isClosed) controller.add(List.from(noticesList));
       } catch (e) {
         print('NoticesStream fetchInitial error: $e');
@@ -510,6 +599,32 @@ class AuthService {
     }
 
     fetchInitial();
+
+    // `onNewDelivery` fires only for genuinely new pushes: either a brand
+    // new notice, or a recurring one whose last_sent_at just advanced.
+    void handleIncomingRow(Map<String, dynamic> row, void Function(Map<String, dynamic>) onNewDelivery) {
+      if (!isNoticeForStudent(row) || !isDispatched(row)) return;
+
+      final id = row['id'] as int;
+      final incomingSentAt = row['last_sent_at'] as String?;
+      final alreadyKnownSentAt = _lastKnownSentAt[id];
+
+      if (alreadyKnownSentAt == incomingSentAt) return; // nothing new to show
+
+      _lastKnownSentAt[id] = incomingSentAt;
+
+      final existingIndex = noticesList.indexWhere((n) => n['id'] == id);
+      if (existingIndex != -1) {
+        noticesList[existingIndex] = row;
+      } else {
+        noticesList.insert(0, row);
+      }
+      noticesList.sort((a, b) => ((b['last_sent_at'] ?? '') as String)
+          .compareTo((a['last_sent_at'] ?? '') as String));
+
+      if (!controller.isClosed) controller.add(List.from(noticesList));
+      onNewDelivery(row);
+    }
 
     final channelName = 'notices_realtime';
     final channel = _supabaseClient.channel(channelName);
@@ -520,11 +635,17 @@ class AuthService {
           schema: 'public',
           table: 'notices',
           callback: (payload) {
-            final newRow = payload.newRecord;
-            if (isNoticeForStudent(newRow)) {
-              noticesList.insert(0, Map<String, dynamic>.from(newRow));
-              if (!controller.isClosed) controller.add(List.from(noticesList));
-            }
+            handleIncomingRow(Map<String, dynamic>.from(payload.newRecord), (_) {});
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'notices',
+          callback: (payload) {
+            // Skipped on the very first tick after subscribing to avoid
+            // re-announcing everything fetchInitial() already loaded.
+            handleIncomingRow(Map<String, dynamic>.from(payload.newRecord), (_) {});
           },
         )
         .subscribe();

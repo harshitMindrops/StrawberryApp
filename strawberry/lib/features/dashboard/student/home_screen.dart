@@ -74,10 +74,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final notices = await _authService.getNoticesForStudent(uid, studentType);
       int unread = 0;
       for (var n in notices) {
-        final createdStr = n['created_at'] as String?;
-        if (createdStr != null) {
-          final created = DateTime.tryParse(createdStr);
-          if (created != null && created.isAfter(lastViewed)) {
+        final sentStr = (n['last_sent_at'] ?? n['created_at']) as String?;
+        if (sentStr != null) {
+          final sent = DateTime.tryParse(sentStr);
+          if (sent != null && sent.isAfter(lastViewed)) {
             unread++;
           }
         }
@@ -99,24 +99,28 @@ class _HomeScreenState extends State<HomeScreen> {
     if (uid.isEmpty) return;
 
     bool isFirstEmit = true;
-    List<int> initialIds = [];
+    // Tracks the last_sent_at we've already reacted to per notice id, so a
+    // recurring notice (same id, new last_sent_at each time it fires) still
+    // triggers a fresh in-app popup + badge refresh every time it's sent —
+    // not just the very first time.
+    final Map<int, String?> seenSentAt = {};
 
     _noticesSubscription = _authService
         .getNoticesRealtimeStream(uid, studentType)
         .listen((notices) {
-      final currentIds = notices.map((n) => n['id'] as int).toList();
-      
       if (isFirstEmit) {
-        initialIds = currentIds;
+        for (final n in notices) {
+          seenSentAt[n['id'] as int] = n['last_sent_at'] as String?;
+        }
         isFirstEmit = false;
         return;
       }
 
-      // Check for new notices
       for (var notice in notices) {
         final id = notice['id'] as int;
-        if (!initialIds.contains(id)) {
-          initialIds.add(id);
+        final sentAt = notice['last_sent_at'] as String?;
+        if (seenSentAt[id] != sentAt) {
+          seenSentAt[id] = sentAt;
           _showInAppNotification(notice);
           _loadUnreadNoticesCount();
         }

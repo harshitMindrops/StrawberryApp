@@ -104,8 +104,8 @@ class _NoticeBoardPageState extends State<NoticeBoardPage> {
                         final title = n['title'] ?? '';
                         final body = n['body'] ?? '';
                         final category = n['category'] ?? 'General';
-                        final created = n['created_at'] != null
-                            ? n['created_at'].toString().split('T').first
+                        final created = (n['last_sent_at'] ?? n['created_at']) != null
+                            ? (n['last_sent_at'] ?? n['created_at']).toString().split('T').first
                             : '';
 
                         Color catColor = const Color(0xFF3E8EFF);
