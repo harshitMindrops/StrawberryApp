@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_saver/file_saver.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// Admin "Review & Analysis" dashboard.
 /// - Total students / new admissions this month
@@ -182,12 +185,9 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
     }
   }
 
-  // ── Export month-wise attendance to Excel ────────────────────────────
-  Future<void> _exportMonthToExcel() async {
-    if (_exporting) return;
-    setState(() => _exporting = true);
-    try {
-      final daysInMonth =
+  // ── Build the month-wise attendance Excel bytes (no I/O side-effects) ─
+  Future<({Uint8List bytes, String fileName})> _buildMonthExcel() async {
+    final daysInMonth =
           DateTime(_visibleMonth.year, _visibleMonth.month + 1, 0).day;
       final monthFileLabel = DateFormat('MMMM_yyyy').format(_visibleMonth);
 
@@ -305,46 +305,168 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
       }
 
       final fileName = 'Attendance_$monthFileLabel';
-      await FileSaver.instance.saveFile(
+      return (bytes: Uint8List.fromList(bytes), fileName: fileName);
+  }
+
+  void _showSnack(String message, {required bool success}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(children: [
+          Icon(
+            success ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+            color: Colors.white,
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(message,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ]),
+        backgroundColor: success ? _success : _danger,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  // ── Download the Excel file — lets the user pick a visible location ──
+  // NOTE: FileSaver.saveFile() on Android silently writes to the app's
+  // PRIVATE folder (Android/data/<package>/files/), which is hidden from
+  // the Files app / Downloads on most phones (blocked outright on Android
+  // 11+). saveAs() instead opens the native "Save As" picker so the user
+  // chooses a real, visible folder (e.g. Downloads) themselves.
+  Future<void> _downloadMonthExcel() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final (:bytes, :fileName) = await _buildMonthExcel();
+      final savedPath = await FileSaver.instance.saveAs(
         name: fileName,
-        bytes: Uint8List.fromList(bytes),
+        bytes: bytes,
         ext: 'xlsx',
         mimeType: MimeType.other,
-        customMimeType:
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       );
-
       if (!mounted) return;
       setState(() => _exporting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text('$fileName.xlsx downloaded — check your Downloads folder',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-          ]),
-          backgroundColor: _success,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+
+      if (savedPath == null || savedPath.isEmpty) {
+        // User backed out of the save dialog — not an error.
+        return;
+      }
+      _showSnack('$fileName.xlsx saved successfully', success: true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _exporting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to export: $e'),
-          backgroundColor: _danger,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          margin: const EdgeInsets.all(16),
+      _showSnack('Failed to download: $e', success: false);
+    }
+  }
+
+  // ── Share the Excel file via WhatsApp / Email / Drive / etc. ────────
+  Future<void> _shareMonthExcel() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final (:bytes, :fileName) = await _buildMonthExcel();
+      // Share plugins on Android & iOS need a real file path, so we write
+      // the bytes to the app's temp directory first, then hand that off
+      // to the native share sheet.
+      final tempDir = await getTemporaryDirectory();
+      final filePath = '${tempDir.path}/$fileName.xlsx';
+      final file = File(filePath);
+      await file.writeAsBytes(bytes, flush: true);
+
+      if (!mounted) return;
+      setState(() => _exporting = false);
+
+      final result = await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile(
+              filePath,
+              mimeType:
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              name: '$fileName.xlsx',
+            ),
+          ],
+          subject: '$fileName Attendance Report',
+          text: 'Attendance report for $fileName',
         ),
       );
+
+      if (result.status == ShareResultStatus.success && mounted) {
+        _showSnack('$fileName.xlsx shared successfully', success: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _exporting = false);
+      _showSnack('Failed to share: $e', success: false);
     }
+  }
+
+  // ── Bottom sheet: let the user pick Download or Share ────────────────
+  void _showExportOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 18),
+                    decoration: BoxDecoration(
+                      color: _border,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+                const Text('Export Attendance',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800, color: _textDark)),
+                const SizedBox(height: 4),
+                const Text('Choose how you want to get this month\'s report.',
+                    style: TextStyle(fontSize: 12.5, color: _textMuted)),
+                const SizedBox(height: 16),
+                _ExportOptionTile(
+                  icon: Icons.download_rounded,
+                  iconColor: _blueAccent,
+                  title: 'Download to device',
+                  subtitle: 'Pick a folder (e.g. Downloads) to save the file',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _downloadMonthExcel();
+                  },
+                ),
+                const SizedBox(height: 10),
+                _ExportOptionTile(
+                  icon: Icons.share_rounded,
+                  iconColor: _primaryDark,
+                  title: 'Share',
+                  subtitle: 'Send via WhatsApp, Email, Drive, etc.',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _shareMonthExcel();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -376,8 +498,8 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
                   )
                 : IconButton(
                     icon: const Icon(Icons.file_download_rounded, color: _primaryDark),
-                    tooltip: 'Download month as Excel',
-                    onPressed: _loading ? null : _exportMonthToExcel,
+                    tooltip: 'Download or share this month as Excel',
+                    onPressed: _loading ? null : _showExportOptions,
                   ),
           ),
         ],
@@ -800,6 +922,65 @@ class _RoundIconBtn extends StatelessWidget {
           color: disabled
               ? const Color(0xFF8A8794).withOpacity(0.4)
               : const Color(0xFFD32F52),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExportOptionTile extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ExportOptionTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF6F6FB),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFEDEDF4)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E1B24))),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF8A8794))),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFF8A8794), size: 20),
+          ],
         ),
       ),
     );
