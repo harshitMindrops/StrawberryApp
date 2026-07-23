@@ -46,6 +46,8 @@ dependencies:
   firebase_messaging: ^16.4.1
   flutter_local_notifications: ^17.2.2
   googleapis_auth: ^1.6.0
+  excel: ^4.0.6
+  file_saver: ^0.2.14
 
 dev_dependencies:
   flutter_test:

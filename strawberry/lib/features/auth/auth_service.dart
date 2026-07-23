@@ -243,9 +243,28 @@ class AuthService {
   Future<List<Map<String, dynamic>>> getAllStudents() async {
     final response = await _supabaseClient
         .from('profiles')
-        .select('id, name, email, photo_url, student_type, fees, fees_paid_months')
+        .select(
+            'id, name, email, photo_url, student_type, fees, fees_paid_months, created_at')
         .eq('role', 'student')
         .eq('status', 'approved');
+    return List<Map<String, dynamic>>.from(response as List);
+  }
+
+  // Fetch attendance records for ALL students within a date range (Admin analytics).
+  // Used for the review/analysis dashboard — day-wise present/absent/late counts,
+  // monthly trends, etc.
+  Future<List<Map<String, dynamic>>> getAttendanceInRange({
+    DateTime? start,
+    DateTime? end,
+  }) async {
+    var query = _supabaseClient.from('attendance').select('student_id, date, status');
+    if (start != null) {
+      query = query.gte('date', start.toIso8601String().split('T').first);
+    }
+    if (end != null) {
+      query = query.lte('date', end.toIso8601String().split('T').first);
+    }
+    final response = await query.order('date', ascending: true);
     return List<Map<String, dynamic>>.from(response as List);
   }
 
