@@ -23,6 +23,10 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController _scrollController = ScrollController();
   late final Stream<List<Map<String, dynamic>>> _chatStream;
 
+  // Messages we've sent/deleted locally, shown immediately while we wait for
+  // the Realtime stream to confirm them (see _sendMessage / _mergeMessages).
+  final List<Map<String, dynamic>> _pendingMessages = [];
+
   static const Color _bg = Color(0xFFF6F6FB);
   static const Color _surface = Colors.white;
   static const Color _primary = Color(0xFFE94464);
@@ -66,13 +70,98 @@ class _ChatPageState extends State<ChatPage> {
     final receiverId = widget.isAdmin ? widget.studentId : 'admin';
 
     try {
-      await _authService.sendMessage(senderId, receiverId, text);
+      // sendMessage now returns the inserted row (with its real id) so we
+      // can show it immediately instead of waiting for the Realtime event
+      // to come back — that round trip is what was making messages only
+      // show up after leaving and reopening the chat.
+      final inserted = await _authService.sendMessage(senderId, receiverId, text);
+      if (!mounted) return;
+      setState(() {
+        _pendingMessages.add(inserted);
+      });
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send message: $e'),
+          backgroundColor: const Color(0xFFEF4949),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteMessage(Map<String, dynamic> msg) async {
+    if (!widget.isAdmin) return;
+    final id = msg['id'];
+    if (id == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete message?'),
+        content: const Text('This message will be permanently deleted for both sides.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4949))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _authService.deleteMessage(id as int);
+      if (!mounted) return;
+      setState(() {
+        _pendingMessages.removeWhere((m) => m['id'] == id);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete message: $e'),
+          backgroundColor: const Color(0xFFEF4949),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteChat() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete entire chat?'),
+        content: Text(
+          'All messages with ${widget.studentName} will be permanently deleted. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete chat', style: TextStyle(color: Color(0xFFEF4949))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _authService.deleteChatThread(widget.studentId);
+      if (!mounted) return;
+      setState(() {
+        _pendingMessages.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat deleted')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete chat: $e'),
           backgroundColor: const Color(0xFFEF4949),
         ),
       );
@@ -107,6 +196,15 @@ class _ChatPageState extends State<ChatPage> {
         elevation: 0,
         scrolledUnderElevation: 0,
         shape: const Border(bottom: BorderSide(color: _border, width: 1)),
+        actions: widget.isAdmin
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, color: _textMuted),
+                  tooltip: 'Delete entire chat',
+                  onPressed: _confirmDeleteChat,
+                ),
+              ]
+            : null,
       ),
       body: Column(
         children: [
@@ -120,7 +218,21 @@ class _ChatPageState extends State<ChatPage> {
                   );
                 }
 
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                final streamMessages = snapshot.data ?? const [];
+
+                // Merge the confirmed stream data with anything we sent
+                // optimistically that the stream hasn't echoed back yet.
+                final streamIds = streamMessages.map((m) => m['id']).toSet();
+                final stillPending =
+                    _pendingMessages.where((m) => !streamIds.contains(m['id'])).toList();
+                final messages = [...streamMessages, ...stillPending]
+                  ..sort((a, b) {
+                    final ta = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+                    final tb = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+                    return ta.compareTo(tb);
+                  });
+
+                if (messages.isEmpty) {
                   return const Center(
                     child: Text(
                       'No messages yet. Send a message to start.',
@@ -129,7 +241,6 @@ class _ChatPageState extends State<ChatPage> {
                   );
                 }
 
-                final messages = snapshot.data!;
                 _scrollToBottom();
 
                 return ListView.builder(
@@ -149,6 +260,8 @@ class _ChatPageState extends State<ChatPage> {
                       alignment: isMe
                           ? Alignment.centerRight
                           : Alignment.centerLeft,
+                      child: GestureDetector(
+                      onLongPress: widget.isAdmin ? () => _confirmDeleteMessage(msg) : null,
                       child: Container(
                         margin: const EdgeInsets.symmetric(vertical: 4),
                         padding: const EdgeInsets.symmetric(
@@ -187,6 +300,7 @@ class _ChatPageState extends State<ChatPage> {
                             fontWeight: isMe ? FontWeight.w600 : FontWeight.w500,
                           ),
                         ),
+                      ),
                       ),
                     );
                   },

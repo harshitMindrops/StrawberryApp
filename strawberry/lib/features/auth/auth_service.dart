@@ -750,18 +750,39 @@ class AuthService {
 
   // ----- Chat Methods -----
 
-  // Send a chat message
-  Future<void> sendMessage(
+  // Send a chat message.
+  // Returns the inserted row (with its real `id` + `created_at`) so the
+  // caller can optimistically show it immediately, instead of waiting on
+  // the Realtime INSERT event to round-trip back.
+  Future<Map<String, dynamic>> sendMessage(
     String senderId,
     String receiverId,
     String text,
   ) async {
-    await _supabaseClient.from('messages').insert({
-      'sender_id': senderId,
-      'receiver_id': receiverId,
-      'message': text,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    final inserted = await _supabaseClient
+        .from('messages')
+        .insert({
+          'sender_id': senderId,
+          'receiver_id': receiverId,
+          'message': text,
+          'created_at': DateTime.now().toIso8601String(),
+        })
+        .select()
+        .single();
+    return Map<String, dynamic>.from(inserted);
+  }
+
+  // Delete a single chat message (admin only, either side's message).
+  Future<void> deleteMessage(int id) async {
+    await _supabaseClient.from('messages').delete().eq('id', id);
+  }
+
+  // Delete an entire chat thread between a student and admin.
+  Future<void> deleteChatThread(String studentId) async {
+    await _supabaseClient
+        .from('messages')
+        .delete()
+        .or('and(sender_id.eq.$studentId,receiver_id.eq.admin),and(sender_id.eq.admin,receiver_id.eq.$studentId)');
   }
 
   // Stream messages for a chat between student and admin
@@ -806,6 +827,10 @@ class AuthService {
           callback: (payload) {
             final newRow = payload.newRecord;
             if (isMessageForThisChat(newRow)) {
+              final id = newRow['id'];
+              // Avoid duplicating a message we already added optimistically
+              // on the sending side (see ChatPage._sendMessage).
+              if (id != null && messages.any((m) => m['id'] == id)) return;
               messages.add(Map<String, dynamic>.from(newRow));
               // Sort by created_at to ensure correct order
               messages.sort((a, b) {
@@ -814,6 +839,23 @@ class AuthService {
                 return ta.compareTo(tb);
               });
               if (!controller.isClosed) controller.add(List.from(messages));
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'messages',
+          callback: (payload) {
+            // Supabase only guarantees the primary key in oldRecord unless
+            // REPLICA IDENTITY FULL is set on the table, so match on id only.
+            final oldRow = payload.oldRecord;
+            final id = oldRow['id'];
+            if (id == null) return;
+            final before = messages.length;
+            messages.removeWhere((m) => m['id'] == id);
+            if (messages.length != before && !controller.isClosed) {
+              controller.add(List.from(messages));
             }
           },
         )
