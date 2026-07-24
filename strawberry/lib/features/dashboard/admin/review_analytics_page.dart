@@ -185,23 +185,34 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
     }
   }
 
+  String _formatTimeShort(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final minStr = minute.toString().padLeft(2, '0');
+      return '${hour.toString().padLeft(2, '0')}:$minStr';
+    } catch (_) {
+      return timeStr;
+    }
+  }
+
   // ── Build the month-wise attendance Excel bytes (no I/O side-effects) ─
   Future<({Uint8List bytes, String fileName})> _buildMonthExcel() async {
     final daysInMonth =
           DateTime(_visibleMonth.year, _visibleMonth.month + 1, 0).day;
       final monthFileLabel = DateFormat('MMMM_yyyy').format(_visibleMonth);
 
-      // studentId -> day -> status, built from the currently loaded month's
+      // studentId -> day -> record, built from the currently loaded month's
       // attendance records.
-      final Map<String, Map<int, String>> byStudent = {};
+      final Map<String, Map<int, Map<String, dynamic>>> byStudent = {};
       for (final r in _monthAttendance) {
         final sid = r['student_id']?.toString();
         final dateStr = r['date']?.toString();
-        final status = r['status']?.toString();
-        if (sid == null || dateStr == null || status == null) continue;
+        if (sid == null || dateStr == null) continue;
         final d = DateTime.tryParse(dateStr);
         if (d == null) continue;
-        byStudent.putIfAbsent(sid, () => {})[d.day] = status;
+        byStudent.putIfAbsent(sid, () => {})[d.day] = r;
       }
 
       final sortedStudents = List<Map<String, dynamic>>.from(_students)
@@ -238,19 +249,35 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
         int p = 0, a = 0, l = 0;
         final row = <CellValue>[TextCellValue(name), TextCellValue(category)];
         for (int d = 1; d <= daysInMonth; d++) {
-          final status = dayMap[d];
-          String short = '-';
+          final rec = dayMap[d];
+          final status = rec?['status']?.toString();
+          final inTime = rec?['in_time']?.toString();
+          final outTime = rec?['out_time']?.toString();
+
+          String cellVal = '-';
           if (status == 'Present') {
-            short = 'P';
             p++;
+            if (inTime != null || outTime != null) {
+              final inStr = inTime != null ? _formatTimeShort(inTime) : '--';
+              final outStr = outTime != null ? _formatTimeShort(outTime) : '--';
+              cellVal = 'P ($inStr - $outStr)';
+            } else {
+              cellVal = 'P';
+            }
           } else if (status == 'Absent') {
-            short = 'A';
             a++;
+            cellVal = 'A';
           } else if (status == 'Late') {
-            short = 'L';
             l++;
+            if (inTime != null || outTime != null) {
+              final inStr = inTime != null ? _formatTimeShort(inTime) : '--';
+              final outStr = outTime != null ? _formatTimeShort(outTime) : '--';
+              cellVal = 'L ($inStr - $outStr)';
+            } else {
+              cellVal = 'L';
+            }
           }
-          row.add(TextCellValue(short));
+          row.add(TextCellValue(cellVal));
         }
         final marked = p + a + l;
         final pct = marked == 0 ? 0.0 : ((p + l) / marked) * 100;
@@ -275,7 +302,8 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
       for (int d = 1; d <= daysInMonth; d++) {
         int p = 0, a = 0, l = 0;
         for (final entry in byStudent.values) {
-          final status = entry[d];
+          final rec = entry[d];
+          final status = rec?['status']?.toString();
           if (status == 'Present') p++;
           if (status == 'Absent') a++;
           if (status == 'Late') l++;
@@ -292,9 +320,43 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
         ]);
       }
 
+      // ── Sheet 3: Detailed check-in/out log ─────────────────────────────
+      final logSheet = excel['Detailed Log'];
+      logSheet.appendRow([
+        TextCellValue('Student Name'),
+        TextCellValue('Category'),
+        TextCellValue('Date'),
+        TextCellValue('Status'),
+        TextCellValue('Check-in Time'),
+        TextCellValue('Check-out Time'),
+      ]);
+      for (final s in sortedStudents) {
+        final sid = s['id'] as String;
+        final name = (s['name'] as String?) ?? 'Student';
+        final category = (s['student_type'] as String?) ?? '—';
+        final dayMap = byStudent[sid] ?? {};
+        for (int d = 1; d <= daysInMonth; d++) {
+          final rec = dayMap[d];
+          if (rec == null) continue;
+          final date = DateTime(_visibleMonth.year, _visibleMonth.month, d);
+          final status = rec['status']?.toString() ?? '—';
+          final inTime = rec['in_time']?.toString() ?? '—';
+          final outTime = rec['out_time']?.toString() ?? '—';
+          logSheet.appendRow([
+            TextCellValue(name),
+            TextCellValue(category),
+            TextCellValue(DateFormat('dd MMM yyyy').format(date)),
+            TextCellValue(status),
+            TextCellValue(inTime != '—' ? _formatTimeShort(inTime) : '—'),
+            TextCellValue(outTime != '—' ? _formatTimeShort(outTime) : '—'),
+          ]);
+        }
+      }
+
       // Drop the blank default sheet Excel.createExcel() ships with.
       if (originalDefaultSheet != 'Attendance Detail' &&
-          originalDefaultSheet != 'Daily Summary') {
+          originalDefaultSheet != 'Daily Summary' &&
+          originalDefaultSheet != 'Detailed Log') {
         excel.delete(originalDefaultSheet!);
       }
       excel.setDefaultSheet('Attendance Detail');

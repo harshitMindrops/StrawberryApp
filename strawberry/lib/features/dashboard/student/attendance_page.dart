@@ -14,6 +14,23 @@ class _AttendancePageState extends State<AttendancePage> {
   List<Map<String, dynamic>> _records = [];
   bool _loading = true;
 
+  String _formatTimeString(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return '';
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final tod = TimeOfDay(hour: hour, minute: minute);
+      
+      final period = tod.period == DayPeriod.am ? 'AM' : 'PM';
+      final hourOfPeriod = tod.hourOfPeriod == 0 ? 12 : tod.hourOfPeriod;
+      final minStr = tod.minute.toString().padLeft(2, '0');
+      return '$hourOfPeriod:$minStr $period';
+    } catch (_) {
+      return timeStr;
+    }
+  }
+
   static const Color _bg = Color(0xFFF6F6FB);
   static const Color _surface = Colors.white;
   static const Color _primary = Color(0xFFE94464);
@@ -154,13 +171,44 @@ class _AttendancePageState extends State<AttendancePage> {
                             fontSize: 15,
                           ),
                         ),
-                        subtitle: Text(
-                          'Status: $status',
-                          style: TextStyle(
-                            color: isPresent ? _success : _danger,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Status: $status',
+                              style: TextStyle(
+                                color: isPresent ? _success : _danger,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                            if (isPresent && (rec['in_time'] != null || rec['out_time'] != null)) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  if (rec['in_time'] != null) ...[
+                                    const Icon(Icons.login_rounded, size: 12, color: _textMuted),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'In: ${_formatTimeString(rec['in_time'])}',
+                                      style: const TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.w500),
+                                    ),
+                                  ],
+                                  if (rec['in_time'] != null && rec['out_time'] != null) ...[
+                                    const SizedBox(width: 12),
+                                  ],
+                                  if (rec['out_time'] != null) ...[
+                                    const Icon(Icons.logout_rounded, size: 12, color: _textMuted),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Out: ${_formatTimeString(rec['out_time'])}',
+                                      style: const TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.w500),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     );

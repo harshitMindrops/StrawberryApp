@@ -42,8 +42,8 @@ class _StudentAttendanceHistoryPageState
   bool _loading = true;
   String? _error;
 
-  // date(yyyy-MM-dd) -> status
-  Map<String, String> _statusByDate = {};
+  // date(yyyy-MM-dd) -> record map
+  Map<String, Map<String, dynamic>> _recordsByDate = {};
 
   DateTime _visibleMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
@@ -61,17 +61,16 @@ class _StudentAttendanceHistoryPageState
     try {
       final records = await widget.authService
           .getStudentAttendance(widget.student['id'] as String);
-      final map = <String, String>{};
+      final map = <String, Map<String, dynamic>>{};
       for (final r in records) {
         final date = r['date']?.toString();
-        final status = r['status']?.toString();
-        if (date != null && status != null) {
-          map[date] = status;
+        if (date != null) {
+          map[date] = r;
         }
       }
       if (!mounted) return;
       setState(() {
-        _statusByDate = map;
+        _recordsByDate = map;
         _loading = false;
       });
     } catch (e) {
@@ -85,11 +84,12 @@ class _StudentAttendanceHistoryPageState
 
   // ── Derived stats (all-time) ─────────────────────────────────────────
   int get _presentCount =>
-      _statusByDate.values.where((s) => s == 'Present').length;
+      _recordsByDate.values.where((r) => r['status'] == 'Present').length;
   int get _absentCount =>
-      _statusByDate.values.where((s) => s == 'Absent').length;
-  int get _lateCount => _statusByDate.values.where((s) => s == 'Late').length;
-  int get _totalMarked => _statusByDate.length;
+      _recordsByDate.values.where((r) => r['status'] == 'Absent').length;
+  int get _lateCount =>
+      _recordsByDate.values.where((r) => r['status'] == 'Late').length;
+  int get _totalMarked => _recordsByDate.length;
   double get _percentage {
     if (_totalMarked == 0) return 0;
     // Present + Late both count as "attended" for the percentage.
@@ -99,10 +99,11 @@ class _StudentAttendanceHistoryPageState
   // ── Derived stats (for currently visible month) ─────────────────────
   Map<String, int> get _monthStats {
     int p = 0, a = 0, l = 0;
-    _statusByDate.forEach((date, status) {
+    _recordsByDate.forEach((date, r) {
       final d = DateTime.tryParse(date);
       if (d == null) return;
       if (d.year == _visibleMonth.year && d.month == _visibleMonth.month) {
+        final status = r['status']?.toString();
         if (status == 'Present') p++;
         if (status == 'Absent') a++;
         if (status == 'Late') l++;
@@ -128,6 +129,149 @@ class _StudentAttendanceHistoryPageState
       default:
         return _border;
     }
+  }
+
+  String _formatTimeStr(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return '--:--';
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final hour12 = hour % 12 == 0 ? 12 : hour % 12;
+      final minStr = minute.toString().padLeft(2, '0');
+      return '$hour12:$minStr $period';
+    } catch (_) {
+      return timeStr;
+    }
+  }
+
+  void _showDayDetails(BuildContext context, DateTime date, String status, Map<String, dynamic>? record) {
+    final formattedDate = DateFormat('dd MMMM yyyy').format(date);
+    final inTime = record?['in_time'] as String?;
+    final outTime = record?['out_time'] as String?;
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                formattedDate,
+                style: const TextStyle(
+                  color: _textDark,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _colorFor(status).withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    status == 'Present'
+                        ? Icons.check_circle_rounded
+                        : status == 'Absent'
+                            ? Icons.cancel_rounded
+                            : Icons.schedule_rounded,
+                    color: _colorFor(status),
+                    size: 26,
+                  ),
+                ),
+                title: const Text(
+                  'Status',
+                  style: TextStyle(fontSize: 13, color: _textMuted, fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  status,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: _colorFor(status),
+                  ),
+                ),
+              ),
+              if (status != 'Absent' && (inTime != null || outTime != null)) ...[
+                const Divider(color: _border, height: 24),
+                Row(
+                  children: [
+                    if (inTime != null)
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Check-in Time',
+                              style: TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _formatTimeStr(inTime),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: _textDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (outTime != null)
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Check-out Time',
+                              style: TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _formatTimeStr(outTime),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: _textDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  elevation: 0,
+                ),
+                child: const Text('Close', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -400,7 +544,8 @@ class _StudentAttendanceHistoryPageState
               final day = index - leadingBlanks + 1;
               final date = DateTime(_visibleMonth.year, _visibleMonth.month, day);
               final dateKey = DateFormat('yyyy-MM-dd').format(date);
-              final status = _statusByDate[dateKey];
+              final record = _recordsByDate[dateKey];
+              final status = record?['status']?.toString();
               final isFuture = date.isAfter(DateTime.now());
               final color = isFuture
                   ? Colors.transparent
@@ -408,41 +553,54 @@ class _StudentAttendanceHistoryPageState
               final dotColor = _colorFor(status);
               final isToday = DateFormat('yyyy-MM-dd').format(DateTime.now()) == dateKey;
 
-              return Tooltip(
-                message: status ?? (isFuture ? '' : 'No record'),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isFuture ? Colors.transparent : color,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isToday ? _primary : Colors.transparent,
-                      width: 1.4,
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        '$day',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: isFuture ? _textMuted.withOpacity(0.4) : _textDark,
-                        ),
+              String tooltipMsg = status ?? (isFuture ? '' : 'No record');
+              if (status != null && status != 'Absent') {
+                final inTime = record?['in_time'] as String?;
+                final outTime = record?['out_time'] as String?;
+                if (inTime != null || outTime != null) {
+                  tooltipMsg += ' (${_formatTimeStr(inTime)} - ${_formatTimeStr(outTime)})';
+                }
+              }
+
+              return InkWell(
+                onTap: (isFuture || status == null) ? null : () => _showDayDetails(context, date, status, record),
+                borderRadius: BorderRadius.circular(8),
+                child: Tooltip(
+                  message: tooltipMsg,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isFuture ? Colors.transparent : color,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isToday ? _primary : Colors.transparent,
+                        width: 1.4,
                       ),
-                      if (!isFuture && status != null) ...[
-                        const SizedBox(height: 2),
-                        Container(
-                          width: 5,
-                          height: 5,
-                          decoration: BoxDecoration(
-                            color: dotColor,
-                            shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '$day',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: isFuture ? _textMuted.withOpacity(0.4) : _textDark,
                           ),
                         ),
+                        if (!isFuture && status != null) ...[
+                          const SizedBox(height: 2),
+                          Container(
+                            width: 5,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: dotColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               );

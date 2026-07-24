@@ -40,8 +40,74 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
   String? _selectedCategory;
   List<Map<String, dynamic>> _students = [];
   Map<String, String> _attendanceStatus = {};
+  Map<String, TimeOfDay?> _inTimes = {};
+  Map<String, TimeOfDay?> _outTimes = {};
   bool _loading = true;
   bool _saving = false;
+
+  TimeOfDay? _parseTimeString(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return null;
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _formatTimeOfDay(TimeOfDay? time) {
+    if (time == null) return null;
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute:00';
+  }
+
+  bool _isDaycareCategory(String? category) {
+    if (category == null) return false;
+    return category.toLowerCase().contains('daycare');
+  }
+
+  TimeOfDay _getDefaultInTime(String? category) {
+    return _isDaycareCategory(category)
+        ? const TimeOfDay(hour: 10, minute: 0)
+        : const TimeOfDay(hour: 8, minute: 0);
+  }
+
+  TimeOfDay _getDefaultOutTime(String? category) {
+    return _isDaycareCategory(category)
+        ? const TimeOfDay(hour: 18, minute: 0)
+        : const TimeOfDay(hour: 12, minute: 0);
+  }
+
+  void _toggleTimesForStudent(String studentId, bool enable, String category) {
+    if (enable) {
+      _inTimes[studentId] = _getDefaultInTime(category);
+      _outTimes[studentId] = _getDefaultOutTime(category);
+    } else {
+      _inTimes[studentId] = null;
+      _outTimes[studentId] = null;
+    }
+  }
+
+  Future<void> _selectTime(BuildContext context, String studentId, bool isInTime, String category) async {
+    final current = isInTime ? _inTimes[studentId] : _outTimes[studentId];
+    final initial = current ?? (isInTime ? _getDefaultInTime(category) : _getDefaultOutTime(category));
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+    if (picked != null) {
+      setState(() {
+        if (isInTime) {
+          _inTimes[studentId] = picked;
+        } else {
+          _outTimes[studentId] = picked;
+        }
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -79,14 +145,25 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       if (!mounted) return;
       setState(() {
         _attendanceStatus.clear();
+        _inTimes.clear();
+        _outTimes.clear();
         final existingMap = {
-          for (var r in records) r['student_id'] as String: r['status'] as String
+          for (var r in records) r['student_id'] as String: r
         };
         final filteredStudents = _students.where((s) =>
             (s['student_type'] as String? ?? 'Other') == _selectedCategory).toList();
         for (var s in filteredStudents) {
           final id = s['id'] as String;
-          _attendanceStatus[id] = existingMap[id] ?? 'Present';
+          final rec = existingMap[id];
+          if (rec != null) {
+            _attendanceStatus[id] = rec['status'] as String? ?? 'Present';
+            _inTimes[id] = _parseTimeString(rec['in_time'] as String?);
+            _outTimes[id] = _parseTimeString(rec['out_time'] as String?);
+          } else {
+            _attendanceStatus[id] = 'Present';
+            _inTimes[id] = null;
+            _outTimes[id] = null;
+          }
         }
         _loading = false;
       });
@@ -250,9 +327,14 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
 
     final entries = filteredStudents
         .map(
-          (s) => {
-            'student_id': s['id'],
-            'status': _attendanceStatus[s['id'] as String] ?? 'Present',
+          (s) {
+            final id = s['id'] as String;
+            return {
+              'student_id': id,
+              'status': _attendanceStatus[id] ?? 'Present',
+              'in_time': _formatTimeOfDay(_inTimes[id]),
+              'out_time': _formatTimeOfDay(_outTimes[id]),
+            };
           },
         )
         .toList();
@@ -448,7 +530,7 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
                       const SizedBox(height: 14),
 
                       // Quick summary row
-                      if (_selectedDate != null && _selectedCategory != null && filteredStudents.isNotEmpty)
+                      if (_selectedDate != null && _selectedCategory != null && filteredStudents.isNotEmpty) ...[
                         Row(
                           children: [
                             Expanded(
@@ -479,6 +561,48 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
+                        InkWell(
+                          onTap: () {
+                            bool anyHaveTimes = filteredStudents.any((s) => _inTimes[s['id']] != null);
+                            setState(() {
+                              for (var s in filteredStudents) {
+                                final id = s['id'] as String;
+                                final status = _attendanceStatus[id] ?? 'Present';
+                                if (status == 'Present' || status == 'Late') {
+                                  _toggleTimesForStudent(id, !anyHaveTimes, s['student_type'] as String? ?? 'Other');
+                                }
+                              }
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: _Palette.primarySoft.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: _Palette.border),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.auto_awesome_rounded, size: 16, color: _Palette.primary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  filteredStudents.any((s) => _inTimes[s['id']] != null)
+                                      ? 'Clear times for all students'
+                                      : 'Set default times for all Present/Late',
+                                  style: const TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: _Palette.primaryDark,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -591,8 +715,138 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
                                       const SizedBox(height: 12),
                                       _StatusSegmented(
                                         value: status,
-                                        onChanged: (val) => setState(() => _attendanceStatus[id] = val),
+                                        onChanged: (val) {
+                                          setState(() {
+                                            _attendanceStatus[id] = val;
+                                            if (val == 'Absent') {
+                                              _inTimes[id] = null;
+                                              _outTimes[id] = null;
+                                            }
+                                          });
+                                        },
                                       ),
+                                      if (status == 'Present' || status == 'Late') ...[
+                                        const Padding(
+                                          padding: EdgeInsets.symmetric(vertical: 8.0),
+                                          child: Divider(color: _Palette.border, height: 1),
+                                        ),
+                                        Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 24,
+                                              height: 24,
+                                              child: Checkbox(
+                                                value: _inTimes[id] != null,
+                                                activeColor: _Palette.primary,
+                                                onChanged: (val) {
+                                                  setState(() {
+                                                    _toggleTimesForStudent(id, val ?? false, type);
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: GestureDetector(
+                                                onTap: () {
+                                                  setState(() {
+                                                    final val = _inTimes[id] == null;
+                                                    _toggleTimesForStudent(id, val, type);
+                                                  });
+                                                },
+                                                child: const Text(
+                                                  'Specify check-in/out times',
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: _Palette.textDark,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (_inTimes[id] != null && _outTimes[id] != null) ...[
+                                          const SizedBox(height: 10),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: InkWell(
+                                                  onTap: () => _selectTime(context, id, true, type),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                                                    decoration: BoxDecoration(
+                                                      color: _Palette.bg,
+                                                      border: Border.all(color: _Palette.border),
+                                                      borderRadius: BorderRadius.circular(10),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(Icons.login_rounded, size: 14, color: _Palette.success),
+                                                        const SizedBox(width: 8),
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              const Text(
+                                                                'In Time',
+                                                                style: TextStyle(fontSize: 10, color: _Palette.textMuted, fontWeight: FontWeight.w600),
+                                                              ),
+                                                              const SizedBox(height: 2),
+                                                              Text(
+                                                                _inTimes[id]!.format(context),
+                                                                style: const TextStyle(fontSize: 13, color: _Palette.textDark, fontWeight: FontWeight.w700),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: InkWell(
+                                                  onTap: () => _selectTime(context, id, false, type),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                                                    decoration: BoxDecoration(
+                                                      color: _Palette.bg,
+                                                      border: Border.all(color: _Palette.border),
+                                                      borderRadius: BorderRadius.circular(10),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(Icons.logout_rounded, size: 14, color: _Palette.danger),
+                                                        const SizedBox(width: 8),
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              const Text(
+                                                                'Out Time',
+                                                                style: TextStyle(fontSize: 10, color: _Palette.textMuted, fontWeight: FontWeight.w600),
+                                                              ),
+                                                              const SizedBox(height: 2),
+                                                              Text(
+                                                                _outTimes[id]!.format(context),
+                                                                style: const TextStyle(fontSize: 13, color: _Palette.textDark, fontWeight: FontWeight.w700),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ],
                                     ],
                                   ),
                                 );

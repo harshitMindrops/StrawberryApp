@@ -207,12 +207,12 @@ class AuthService {
   Future<List<Map<String, dynamic>>> getAttendanceForDate(String date) async {
     final response = await _supabaseClient
         .from('attendance')
-        .select('student_id, status')
+        .select('student_id, status, in_time, out_time')
         .eq('date', date);
     return List<Map<String, dynamic>>.from(response as List);
   }
 
-  // Mark attendance for a date; entries: list of maps {student_id, status}
+  // Mark attendance for a date; entries: list of maps {student_id, status, in_time, out_time}
   Future<void> markAttendance(
     String date,
     List<Map<String, dynamic>> entries,
@@ -234,6 +234,8 @@ class AuthService {
             'student_id': e['student_id'],
             'date': date,
             'status': e['status'],
+            'in_time': e['in_time'],
+            'out_time': e['out_time'],
           },
         )
         .toList();
@@ -258,7 +260,7 @@ class AuthService {
     DateTime? start,
     DateTime? end,
   }) async {
-    var query = _supabaseClient.from('attendance').select('student_id, date, status');
+    var query = _supabaseClient.from('attendance').select('student_id, date, status, in_time, out_time');
     if (start != null) {
       query = query.gte('date', start.toIso8601String().split('T').first);
     }
