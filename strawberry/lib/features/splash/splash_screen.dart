@@ -203,7 +203,7 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       );
                     },
-                    child: _StrawberryLogo(
+                    child: const _StrawberryLogo(
                       primary: _primary,
                       primaryDark: _primaryDark,
                       leafGreen: _leafGreen,
@@ -325,8 +325,8 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-/// Logo mark — uses your actual logo.png asset with a soft
-/// premium container (shadow + subtle gradient backdrop).
+/// Logo mark — shows the actual logo.png asset directly,
+/// with no circular container or background wrapper.
 class _StrawberryLogo extends StatelessWidget {
   final Color primary;
   final Color primaryDark;
@@ -340,32 +340,9 @@ class _StrawberryLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 116,
-      height: 116,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFFFF0F1)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: 0.25),
-            blurRadius: 30,
-            spreadRadius: 2,
-            offset: const Offset(0, 12),
-          ),
-          const BoxShadow(
-            color: Colors.white,
-            blurRadius: 10,
-            spreadRadius: -4,
-            offset: Offset(-4, -4),
-          ),
-        ],
-      ),
+    return SizedBox(
+      width: 140,
+      height: 140,
       child: Image.asset('assets/images/logo.png', fit: BoxFit.contain),
     );
   }
