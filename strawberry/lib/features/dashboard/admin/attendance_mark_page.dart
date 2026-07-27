@@ -175,11 +175,13 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final earliestAllowedDate = today.subtract(const Duration(days: 7));
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? now,
-      firstDate: DateTime(now.year - 1),
-      lastDate: now, // Restrict to today's date or earlier
+      initialDate: _selectedDate ?? today,
+      firstDate: earliestAllowedDate, // Restrict to 7 days in the past
+      lastDate: today, // Restrict to today's date or earlier
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -345,6 +347,14 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         _snack('Attendance saved for $_selectedCategory', success: true),
       );
+      setState(() {
+        _selectedDate = null;
+        _selectedCategory = null;
+        _students = [];
+        _attendanceStatus = {};
+        _inTimes = {};
+        _outTimes = {};
+      });
     } finally {
       if (mounted) setState(() => _saving = false);
     }
