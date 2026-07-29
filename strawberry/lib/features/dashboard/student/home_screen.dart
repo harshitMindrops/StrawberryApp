@@ -4,6 +4,7 @@ import 'package:strawberry/features/auth/auth_service.dart';
 import 'package:strawberry/features/dashboard/student/attendance_page.dart';
 import 'package:strawberry/features/dashboard/student/gallery_page.dart';
 import 'package:strawberry/features/dashboard/student/notice_board_page.dart';
+import 'package:strawberry/features/dashboard/student/pay_fees_page.dart';
 import 'package:strawberry/features/chat/chat_page.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -373,6 +374,37 @@ class _HomeScreenState extends State<HomeScreen> {
                       value: '₹${_profile?['fees'] ?? 0}/month',
                       color: const Color(0xFF22B07D),
                     ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: _profile == null
+                            ? null
+                            : () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => PayFeesPage(
+                                      authService: _authService,
+                                      profile: _profile!,
+                                    ),
+                                  ),
+                                ),
+                        icon: const Icon(Icons.bolt_rounded, size: 20),
+                        label: const Text('Pay Fees via UPI'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14.5,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
 
                     const SizedBox(height: 24),
                     const Text(
@@ -403,6 +435,23 @@ class _HomeScreenState extends State<HomeScreen> {
                               builder: (_) => const AttendancePage(),
                             ),
                           ),
+                        ),
+                        _buildNavCard(
+                          icon: Icons.account_balance_wallet_rounded,
+                          title: 'Pay Fees',
+                          subtitle: 'Pay via UPI',
+                          color: _primary,
+                          onTap: () {
+                            if (_profile == null) return;
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PayFeesPage(
+                                  authService: _authService,
+                                  profile: _profile!,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         _buildNavCard(
                           icon: Icons.photo_library_rounded,

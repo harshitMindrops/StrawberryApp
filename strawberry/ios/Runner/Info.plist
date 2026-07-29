@@ -49,6 +49,17 @@
     </dict>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
+    <!-- UPI apps ke schemes — Fee Payment (UPI deep link) feature ke liye,
+         taaki app check/launch kar sake ki GPay/PhonePe/Paytm installed hai ya nahi -->
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+      <string>upi</string>
+      <string>gpay</string>
+      <string>phonepe</string>
+      <string>paytm</string>
+      <string>tez</string>
+      <string>bhim</string>
+    </array>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>
