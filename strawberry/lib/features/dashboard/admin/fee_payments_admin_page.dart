@@ -316,7 +316,7 @@ class _FeePaymentsAdminPageState extends State<FeePaymentsAdminPage> {
                     ...items.map((p) {
                       final status = p['status'] as String? ?? 'initiated';
                       final (color, icon, label) = _statusMeta(status);
-                      final createdAt = DateTime.tryParse(p['created_at'] ?? '');
+                      final createdAt = DateTime.tryParse(p['created_at'] ?? '')?.toLocal();
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: InkWell(

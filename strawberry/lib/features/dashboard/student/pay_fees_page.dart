@@ -105,6 +105,7 @@ class _PayFeesPageState extends State<PayFeesPage> {
       monthKey: _selectedMonth!,
       studentId: widget.profile['id'],
       studentName: widget.profile['name'] ?? '',
+      authService: widget.authService,
     );
     if (!mounted) return;
     setState(() => _paying = false);
@@ -117,7 +118,27 @@ class _PayFeesPageState extends State<PayFeesPage> {
       return;
     }
 
-    _showFollowUpDialog(result.rowId);
+    switch (result.autoStatus) {
+      case 'success':
+        _snack('Payment successful! Fees marked as paid. 🎉', danger: false);
+        setState(() {}); // refresh unpaid-months list
+        return;
+      case 'failed':
+        final reason = result.failureReason;
+        _snack(
+          reason == null
+              ? 'Payment failed. Please try again.'
+              : 'Payment failed ($reason)',
+          danger: true,
+        );
+        return;
+      case 'cancelled':
+        _snack('Payment was cancelled.', danger: true);
+        return;
+      default:
+        // Ambiguous outcome — fall back to asking the student, same as before.
+        _showFollowUpDialog(result.rowId);
+    }
   }
 
   void _showFollowUpDialog(String rowId) {

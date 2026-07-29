@@ -113,7 +113,7 @@ class _PaymentHistoryPageState extends State<PaymentHistoryPage> {
                       final p = _payments[i];
                       final (color, icon, label) =
                           _statusMeta(p['status'] as String? ?? 'initiated');
-                      final createdAt = DateTime.tryParse(p['created_at'] ?? '');
+                      final createdAt = DateTime.tryParse(p['created_at'] ?? '')?.toLocal();
                       return Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(

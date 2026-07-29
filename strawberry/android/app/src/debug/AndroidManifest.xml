@@ -34,8 +34,6 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- Required so the app can see installed UPI apps (GPay, PhonePe, Paytm, etc.)
-             on Android 11+ package-visibility rules. Used by upi_india / fee payments. -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="upi"/>
