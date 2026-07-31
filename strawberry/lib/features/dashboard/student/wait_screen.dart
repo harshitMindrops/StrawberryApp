@@ -21,7 +21,6 @@ class _WaitScreenState extends State<WaitScreen> {
   static const Color _bg = Color(0xFFF6F6FB);
   static const Color _surface = Colors.white;
   static const Color _primary = Color(0xFFE94464);
-  static const Color _primarySoft = Color(0xFFFFE7EC);
   static const Color _textDark = Color(0xFF1E1B24);
   static const Color _textMuted = Color(0xFF8A8794);
   static const Color _amber = Color(0xFFF5A623);
