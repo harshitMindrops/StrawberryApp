@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:strawberry/features/auth/auth_service.dart';
+import 'package:strawberry/features/auth/push_notification_service.dart';
 
 class _Palette {
   static const primary = Color(0xFF7C6FF0); // Violet theme for Holidays
@@ -527,6 +528,31 @@ class _HolidayAdminPageState extends State<HolidayAdminPage> {
             type: type,
             description: description,
           );
+
+          // Send Push Notification to desired categories (even when app is closed)
+          try {
+            final parsedDate = DateTime.tryParse(date);
+            final formattedDate = parsedDate != null
+                ? DateFormat('dd MMM yyyy (EEEE)').format(parsedDate)
+                : date;
+            final isHoliday = type == 'holiday';
+
+            final notifTitle = isHoliday
+                ? '🎉 Holiday Declared: $title'
+                : '📅 Special Working Day: $title';
+            final notifBody = isHoliday
+                ? 'Notice: $formattedDate is declared as a Holiday for ${category == "All" ? "all categories" : category}.'
+                : 'Notice: $formattedDate will be a working day for $category category.';
+
+            await PushNotificationService().sendNoticeNotification(
+              title: notifTitle,
+              body: notifBody,
+              audience: category,
+            );
+          } catch (e) {
+            // Push notification fail should not break holiday creation
+          }
+
           _loadData();
         },
       ),

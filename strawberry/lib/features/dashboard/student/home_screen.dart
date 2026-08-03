@@ -375,6 +375,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: const Color(0xFF22B07D),
                     ),
                     const SizedBox(height: 12),
+
+                    // Detail Row 3: Quick Attendance Percentage
+                    InkWell(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const AttendancePage()),
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      child: _buildInfoCard(
+                        icon: Icons.event_available_rounded,
+                        title: 'Attendance & Holidays',
+                        value: 'View Monthly Attendance & Holidays',
+                        color: const Color(0xFF7C6FF0),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       height: 48,
