@@ -136,12 +136,33 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
     }
   }
 
+  Map<String, dynamic>? _holidayInfo;
+  bool _checkingHoliday = false;
+
+  Future<void> _checkHolidayForCurrentSelection() async {
+    if (_selectedDate == null || _selectedCategory == null) return;
+    setState(() => _checkingHoliday = true);
+
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+    final result = await widget.authService.checkHoliday(
+      dateStr,
+      _selectedCategory!,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _holidayInfo = result;
+      _checkingHoliday = false;
+    });
+  }
+
   Future<void> _loadExistingAttendance() async {
     if (_selectedDate == null || _selectedCategory == null) return;
     setState(() => _loading = true);
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final records = await widget.authService.getAttendanceForDate(dateStr);
+      await _checkHolidayForCurrentSelection();
       if (!mounted) return;
       setState(() {
         _attendanceStatus.clear();
@@ -294,6 +315,7 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
                   },
                 ),
               ),
+              _buildHolidayBanner(),
             ],
           ),
         );
@@ -385,6 +407,111 @@ class _AttendanceMarkPageState extends State<AttendanceMarkPage> {
       }
     }
     return (present: present, absent: absent, late: late);
+  }
+
+  void _markAllAsHoliday() {
+    final filteredStudents = _students
+        .where((s) => (s['student_type'] as String? ?? 'Other') == _selectedCategory)
+        .toList();
+    setState(() {
+      for (final s in filteredStudents) {
+        final id = s['id'] as String;
+        _attendanceStatus[id] = 'Holiday';
+        _inTimes[id] = null;
+        _outTimes[id] = null;
+      }
+    });
+  }
+
+  Widget _buildHolidayBanner() {
+    final info = _holidayInfo;
+    if (info == null) return const SizedBox.shrink();
+
+    final isHoliday = info['isHoliday'] as bool;
+    final isSundayException = info['isSundayException'] as bool;
+    final title = info['title'] as String?;
+
+    if (isSundayException) {
+      return Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _Palette.successSoft,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _Palette.success.withOpacity(0.3)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.school_rounded, color: _Palette.success, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '$title — Class scheduled for $_selectedCategory',
+                style: const TextStyle(
+                  color: _Palette.success,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!isHoliday) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _Palette.dangerSoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _Palette.danger.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.event_busy_rounded, color: _Palette.danger, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$title — Holiday for $_selectedCategory',
+                  style: const TextStyle(
+                    color: _Palette.danger,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18, color: _Palette.danger),
+                onPressed: () => setState(() => _holidayInfo = null),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _Palette.danger,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.check_rounded, size: 16),
+                label: const Text('Mark All as Holiday', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                onPressed: _markAllAsHoliday,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override

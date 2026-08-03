@@ -898,4 +898,116 @@ class AuthService {
 
     return List<Map<String, dynamic>>.from(profilesResponse as List);
   }
-}
+
+  // ----- Holiday Management Methods -----
+
+  /// Check if a category has Saturday as a default weekend holiday.
+  bool isSaturdayDefaultHoliday(String category) {
+    final cat = category.trim().toLowerCase();
+    return cat == 'lkg' || cat == 'nursery' || cat == 'playgroup' || cat == 'ukg';
+  }
+
+  /// Fetch all holiday + working_day entries for a given year-month.
+  Future<List<Map<String, dynamic>>> getHolidaysForMonth(
+    int year,
+    int month,
+  ) async {
+    final from = '$year-${month.toString().padLeft(2, '0')}-01';
+    final lastDay = DateTime(year, month + 1, 0).day;
+    final to = '$year-${month.toString().padLeft(2, '0')}-${lastDay.toString().padLeft(2, '0')}';
+
+    final response = await _supabaseClient
+        .from('holidays')
+        .select('*')
+        .gte('date', from)
+        .lte('date', to)
+        .order('date', ascending: true);
+
+    return List<Map<String, dynamic>>.from(response as List);
+  }
+
+  /// Fetch all entries (holiday + working_day) for a specific date.
+  Future<List<Map<String, dynamic>>> getHolidaysForDate(String date) async {
+    final response = await _supabaseClient
+        .from('holidays')
+        .select('*')
+        .eq('date', date);
+    return List<Map<String, dynamic>>.from(response as List);
+  }
+
+  /// Core holiday check for a date + category combination.
+  /// Returns a map with:
+  ///   isHoliday       -> bool
+  ///   isSundayException -> bool (Weekend hai but is category ki class hai)
+  ///   title           -> String? (holiday/exception ka naam)
+  Future<Map<String, dynamic>> checkHoliday(
+    String date, // 'yyyy-MM-dd'
+    String category, // e.g. 'LKG', 'Nursery', 'School', 'All'
+  ) async {
+    final rows = await getHolidaysForDate(date);
+
+    // Step 1: working_day exception for this category
+    final exception = rows.firstWhere(
+      (r) => r['type'] == 'working_day' && r['category'] == category,
+      orElse: () => {},
+    );
+    if (exception.isNotEmpty) {
+      return {
+        'isHoliday': false,
+        'isSundayException': true,
+        'title': exception['title'],
+      };
+    }
+
+    // Step 2: Weekend default check
+    final dt = DateTime.tryParse(date);
+    if (dt != null) {
+      if (dt.weekday == DateTime.sunday) {
+        return {'isHoliday': true, 'isSundayException': false, 'title': 'Sunday'};
+      }
+      if (dt.weekday == DateTime.saturday && isSaturdayDefaultHoliday(category)) {
+        return {'isHoliday': true, 'isSundayException': false, 'title': 'Saturday'};
+      }
+    }
+
+    // Step 3: Explicit holiday from DB
+    final holiday = rows.firstWhere(
+      (r) =>
+          r['type'] == 'holiday' &&
+          (r['category'] == 'All' || r['category'] == category),
+      orElse: () => {},
+    );
+    if (holiday.isNotEmpty) {
+      return {
+        'isHoliday': true,
+        'isSundayException': false,
+        'title': holiday['title'],
+      };
+    }
+
+    // Step 4: Normal working day
+    return {'isHoliday': false, 'isSundayException': false, 'title': null};
+  }
+
+  /// Add a holiday or a working-day weekend exception.
+  Future<void> addHoliday({
+    required String date,
+    required String title,
+    String? description,
+    required String category,
+    String type = 'holiday',
+  }) async {
+    await _supabaseClient.from('holidays').upsert({
+      'date': date,
+      'title': title,
+      'description': description,
+      'category': category,
+      'type': type,
+    }, onConflict: 'date,category,type');
+  }
+
+  /// Delete a holiday or exception entry by its primary key id.
+  Future<void> deleteHoliday(int id) async {
+    await _supabaseClient.from('holidays').delete().eq('id', id);
+  }
+}

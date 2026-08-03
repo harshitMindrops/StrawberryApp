@@ -49,6 +49,7 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
 
   List<Map<String, dynamic>> _students = [];
   List<Map<String, dynamic>> _monthAttendance = []; // for _visibleMonth
+  List<Map<String, dynamic>> _monthHolidays = []; // holiday rows for _visibleMonth
   DateTime _visibleMonth = DateTime(DateTime.now().year, DateTime.now().month);
   DateTime _selectedDate = DateTime.now();
 
@@ -70,12 +71,14 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
       final results = await Future.wait([
         widget.authService.getAllStudents(),
         widget.authService.getAttendanceInRange(start: firstDay, end: lastDay),
+        widget.authService.getHolidaysForMonth(_visibleMonth.year, _visibleMonth.month),
       ]);
 
       if (!mounted) return;
       setState(() {
         _students = results[0];
         _monthAttendance = results[1];
+        _monthHolidays = results[2];
         _loading = false;
       });
     } catch (e) {
@@ -119,6 +122,47 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
   // ── Derived: selected date breakdown ─────────────────────────────────
   String get _selectedDateKey => DateFormat('yyyy-MM-dd').format(_selectedDate);
 
+  /// Returns true if the given date is a holiday for ANY category
+  /// (Sunday by default, Saturday for LKG/Nursery/Playgroup/UKG, or explicit DB holiday)
+  bool _isDateHoliday(DateTime date) {
+    if (date.weekday == DateTime.sunday) return true;
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    // Check explicit holiday in DB (type='holiday')
+    final dbHol = _monthHolidays.any(
+      (h) => h['date']?.toString() == dateStr && h['type'] == 'holiday',
+    );
+    if (dbHol) return true;
+    // Saturday for small categories
+    if (date.weekday == DateTime.saturday) {
+      return _monthHolidays.any(
+        (h) =>
+            h['date']?.toString() == dateStr &&
+            h['type'] == 'holiday' &&
+            widget.authService.isSaturdayDefaultHoliday(h['category']?.toString() ?? ''),
+      ) ||
+      // If no specific category override, treat Saturday as holiday for those categories
+      // but in Review Analytics we check all categories — if any LKG/Nursery/Playgroup/UKG student exists, Saturday is holiday
+      _students.any((s) => widget.authService.isSaturdayDefaultHoliday(
+            (s['student_type'] as String?) ?? ''));
+    }
+    return false;
+  }
+
+  String? _holidayTitleForDate(DateTime date) {
+    if (date.weekday == DateTime.sunday) return 'Sunday';
+    if (date.weekday == DateTime.saturday &&
+        _students.any((s) => widget.authService
+            .isSaturdayDefaultHoliday((s['student_type'] as String?) ?? ''))) {
+      return 'Saturday';
+    }
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final h = _monthHolidays.firstWhere(
+      (h) => h['date']?.toString() == dateStr && h['type'] == 'holiday',
+      orElse: () => {},
+    );
+    return h.isEmpty ? null : h['title'] as String?;
+  }
+
   Map<String, int> get _selectedDateStats {
     int p = 0, a = 0, l = 0;
     for (final r in _monthAttendance) {
@@ -136,7 +180,9 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
       }
     }
     final marked = p + a + l;
-    final notMarked = (_totalStudents - marked).clamp(0, _totalStudents);
+    // Holiday wale din notMarked = 0 (misleading nahi hoga)
+    final isHol = _isDateHoliday(_selectedDate);
+    final notMarked = isHol ? 0 : (_totalStudents - marked).clamp(0, _totalStudents);
     return {'present': p, 'absent': a, 'late': l, 'notMarked': notMarked};
   }
 
@@ -249,13 +295,44 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
         int p = 0, a = 0, l = 0;
         final row = <CellValue>[TextCellValue(name), TextCellValue(category)];
         for (int d = 1; d <= daysInMonth; d++) {
+          final date = DateTime(_visibleMonth.year, _visibleMonth.month, d);
+          final dateStr = DateFormat('yyyy-MM-dd').format(date);
           final rec = dayMap[d];
           final status = rec?['status']?.toString();
           final inTime = rec?['in_time']?.toString();
           final outTime = rec?['out_time']?.toString();
 
+          // Check if this day is a holiday for this student's category
+          final isSun = date.weekday == DateTime.sunday;
+          final isSatForCat = date.weekday == DateTime.saturday &&
+              widget.authService.isSaturdayDefaultHoliday(category);
+          final hasWorkingDayOverride = _monthHolidays.any(
+            (h) => h['date']?.toString() == dateStr &&
+                h['type'] == 'working_day' &&
+                (h['category'] == category || h['category'] == 'All'),
+          );
+          final isDbHoliday = _monthHolidays.any(
+            (h) => h['date']?.toString() == dateStr &&
+                h['type'] == 'holiday' &&
+                (h['category'] == 'All' || h['category'] == category),
+          );
+          final isHoliday = (isSun || isSatForCat || isDbHoliday) && !hasWorkingDayOverride;
+
           String cellVal = '-';
-          if (status == 'Present') {
+          if (isHoliday && status == null) {
+            // No attendance marked and it's a holiday — label it
+            final holTitle = isSun
+                ? 'Sunday'
+                : isSatForCat
+                    ? 'Saturday'
+                    : (_monthHolidays.firstWhere(
+                            (h) =>
+                                h['date']?.toString() == dateStr &&
+                                h['type'] == 'holiday',
+                            orElse: () => {})['title'] as String?) ??
+                        'Holiday';
+            cellVal = 'H — $holTitle';
+          } else if (status == 'Present') {
             p++;
             if (inTime != null || outTime != null) {
               final inStr = inTime != null ? _formatTimeShort(inTime) : '--';
@@ -276,6 +353,8 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
             } else {
               cellVal = 'L';
             }
+          } else if (status == 'Holiday') {
+            cellVal = 'H';
           }
           row.add(TextCellValue(cellVal));
         }
@@ -294,6 +373,7 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
       final summary = excel['Daily Summary'];
       summary.appendRow([
         TextCellValue('Date'),
+        TextCellValue('Holiday'),
         TextCellValue('Present'),
         TextCellValue('Absent'),
         TextCellValue('Late'),
@@ -311,8 +391,14 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
         final marked = p + a + l;
         final pct = marked == 0 ? 0.0 : ((p + l) / marked) * 100;
         final date = DateTime(_visibleMonth.year, _visibleMonth.month, d);
+        final holTitle = _holidayTitleForDate(date);
+        final dateStr = DateFormat('yyyy-MM-dd').format(date);
+        final isHoliday = holTitle != null ||
+            _monthHolidays.any((h) =>
+                h['date']?.toString() == dateStr && h['type'] == 'holiday');
         summary.appendRow([
           TextCellValue(DateFormat('d MMM yyyy').format(date)),
+          TextCellValue(isHoliday ? (holTitle ?? 'Holiday') : ''),
           IntCellValue(p),
           IntCellValue(a),
           IntCellValue(l),
@@ -727,6 +813,8 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
     final pct = marked == 0
         ? 0.0
         : ((stats['present']! + stats['late']!) / marked) * 100;
+    final isHol = _isDateHoliday(_selectedDate);
+    final holTitle = _holidayTitleForDate(_selectedDate);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -736,7 +824,40 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
         border: Border.all(color: _border),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Holiday banner
+          if (isHol) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              margin: const EdgeInsets.only(bottom: 14),
+              decoration: BoxDecoration(
+                color: _violet.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _violet.withOpacity(0.30)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.beach_access_rounded,
+                      size: 16, color: _violet),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      holTitle != null
+                          ? 'Holiday — $holTitle'
+                          : 'This day is a holiday',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _violet,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           Row(
             children: [
               Expanded(
@@ -753,14 +874,16 @@ class _ReviewAnalyticsPageState extends State<ReviewAnalyticsPage> {
                 child: _MiniStat(
                     label: 'Late', value: stats['late']!, color: _amber, bg: _amberSoft),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _MiniStat(
-                    label: 'Not Marked',
-                    value: stats['notMarked']!,
-                    color: _textMuted,
-                    bg: _bg),
-              ),
+              if (!isHol) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MiniStat(
+                      label: 'Not Marked',
+                      value: stats['notMarked']!,
+                      color: _textMuted,
+                      bg: _bg),
+                ),
+              ],
             ],
           ),
           if (marked > 0) ...[

@@ -44,6 +44,7 @@ class _StudentAttendanceHistoryPageState
 
   // date(yyyy-MM-dd) -> record map
   Map<String, Map<String, dynamic>> _recordsByDate = {};
+  Map<String, Map<String, dynamic>> _holidaysByDate = {};
 
   DateTime _visibleMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
@@ -59,8 +60,18 @@ class _StudentAttendanceHistoryPageState
       _error = null;
     });
     try {
-      final records = await widget.authService
+      final category = (widget.student['student_type'] as String?) ?? 'All';
+      final recordsFuture = widget.authService
           .getStudentAttendance(widget.student['id'] as String);
+      final holidaysFuture = widget.authService.getHolidaysForMonth(
+        _visibleMonth.year,
+        _visibleMonth.month,
+      );
+
+      final results = await Future.wait([recordsFuture, holidaysFuture]);
+      final records = results[0] as List<Map<String, dynamic>>;
+      final holidays = results[1] as List<Map<String, dynamic>>;
+
       final map = <String, Map<String, dynamic>>{};
       for (final r in records) {
         final date = r['date']?.toString();
@@ -68,9 +79,44 @@ class _StudentAttendanceHistoryPageState
           map[date] = r;
         }
       }
+
+      final holidayMap = <String, Map<String, dynamic>>{};
+      final isSatDefault = widget.authService.isSaturdayDefaultHoliday(category);
+      final daysInMonth = DateTime(_visibleMonth.year, _visibleMonth.month + 1, 0).day;
+      
+      for (int day = 1; day <= daysInMonth; day++) {
+        final dt = DateTime(_visibleMonth.year, _visibleMonth.month, day);
+        final dateStr = DateFormat('yyyy-MM-dd').format(dt);
+        if (dt.weekday == DateTime.sunday) {
+          holidayMap[dateStr] = {'type': 'sunday', 'title': 'Sunday'};
+        } else if (dt.weekday == DateTime.saturday && isSatDefault) {
+          holidayMap[dateStr] = {'type': 'saturday', 'title': 'Saturday'};
+        }
+      }
+
+      for (final h in holidays) {
+        final dateStr = h['date']?.toString();
+        if (dateStr == null) continue;
+        if (h['type'] == 'holiday' &&
+            (h['category'] == 'All' || h['category'] == category)) {
+          holidayMap[dateStr] = {
+            'type': 'holiday',
+            'title': h['title'],
+            'category': h['category'],
+          };
+        }
+        if (h['type'] == 'working_day' && h['category'] == category) {
+          holidayMap[dateStr] = {
+            'type': 'working_day',
+            'title': h['title'],
+          };
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _recordsByDate = map;
+        _holidaysByDate = holidayMap;
         _loading = false;
       });
     } catch (e) {
@@ -116,6 +162,7 @@ class _StudentAttendanceHistoryPageState
     setState(() {
       _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month + delta);
     });
+    _load();
   }
 
   Color _colorFor(String? status) {
@@ -146,6 +193,69 @@ class _StudentAttendanceHistoryPageState
     }
   }
 
+  void _showHolidayDetails(BuildContext context, DateTime date, String title, String type) {
+    final formattedDate = DateFormat('dd MMMM yyyy').format(date);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                formattedDate,
+                style: const TextStyle(
+                  color: _textDark,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _dangerSoft,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.event_busy_rounded,
+                    color: _danger,
+                    size: 26,
+                  ),
+                ),
+                title: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: _danger,
+                  ),
+                ),
+                subtitle: Text(
+                  type == 'sunday'
+                      ? 'Sunday — Weekly Off Day'
+                      : type == 'saturday'
+                          ? 'Saturday — Weekend Off Day'
+                          : 'School / Category Holiday',
+                  style: const TextStyle(fontSize: 13, color: _textMuted),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
   void _showDayDetails(BuildContext context, DateTime date, String status, Map<String, dynamic>? record) {
     final formattedDate = DateFormat('dd MMMM yyyy').format(date);
     final inTime = record?['in_time'] as String?;
@@ -544,32 +654,64 @@ class _StudentAttendanceHistoryPageState
               final day = index - leadingBlanks + 1;
               final date = DateTime(_visibleMonth.year, _visibleMonth.month, day);
               final dateKey = DateFormat('yyyy-MM-dd').format(date);
+              final holidayInfo = _holidaysByDate[dateKey];
+              final holidayType = holidayInfo?['type'];
+              final holidayTitle = holidayInfo?['title'];
+
               final record = _recordsByDate[dateKey];
               final status = record?['status']?.toString();
-              final isFuture = date.isAfter(DateTime.now());
-              final color = isFuture
-                  ? Colors.transparent
-                  : _colorFor(status).withOpacity(status == null ? 0.5 : 0.18);
-              final dotColor = _colorFor(status);
-              final isToday = DateFormat('yyyy-MM-dd').format(DateTime.now()) == dateKey;
 
-              String tooltipMsg = status ?? (isFuture ? '' : 'No record');
-              if (status != null && status != 'Absent') {
-                final inTime = record?['in_time'] as String?;
-                final outTime = record?['out_time'] as String?;
-                if (inTime != null || outTime != null) {
-                  tooltipMsg += ' (${_formatTimeStr(inTime)} - ${_formatTimeStr(outTime)})';
-                }
+              final isFuture = date.isAfter(DateTime.now());
+              
+              Color cellBg = Colors.transparent;
+              Color textCol = isFuture ? _textMuted.withOpacity(0.4) : _textDark;
+              Widget? badge;
+
+              if (holidayType == 'sunday' || holidayType == 'saturday' || holidayType == 'holiday') {
+                cellBg = _dangerSoft;
+                badge = Text(
+                  'H',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    color: _danger,
+                  ),
+                );
+              } else if (holidayType == 'working_day') {
+                cellBg = _successSoft;
+                badge = Icon(Icons.check, size: 10, color: _success);
+              } else if (status != null) {
+                cellBg = _colorFor(status).withOpacity(0.18);
+                badge = Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: _colorFor(status),
+                    shape: BoxShape.circle,
+                  ),
+                );
               }
 
+              final isToday = DateFormat('yyyy-MM-dd').format(DateTime.now()) == dateKey;
+
+              String tooltipMsg = holidayTitle != null 
+                  ? '$holidayTitle (Holiday)'
+                  : (status ?? (isFuture ? '' : 'No record'));
+
               return InkWell(
-                onTap: (isFuture || status == null) ? null : () => _showDayDetails(context, date, status, record),
+                onTap: () {
+                  if (holidayType != null && holidayType != 'working_day') {
+                    _showHolidayDetails(context, date, holidayTitle ?? 'Holiday', holidayType);
+                  } else if (status != null) {
+                    _showDayDetails(context, date, status, record);
+                  }
+                },
                 borderRadius: BorderRadius.circular(8),
                 child: Tooltip(
                   message: tooltipMsg,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: isFuture ? Colors.transparent : color,
+                      color: isFuture ? Colors.transparent : cellBg,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isToday ? _primary : Colors.transparent,
@@ -585,19 +727,12 @@ class _StudentAttendanceHistoryPageState
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
-                            color: isFuture ? _textMuted.withOpacity(0.4) : _textDark,
+                            color: textCol,
                           ),
                         ),
-                        if (!isFuture && status != null) ...[
-                          const SizedBox(height: 2),
-                          Container(
-                            width: 5,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: dotColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
+                        if (!isFuture && badge != null) ...[
+                          const SizedBox(height: 1),
+                          badge,
                         ],
                       ],
                     ),

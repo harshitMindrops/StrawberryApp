@@ -10,6 +10,7 @@ import 'student_detail_page.dart';
 import 'categories_admin_page.dart';
 import 'manage_admins_page.dart';
 import 'fee_payments_admin_page.dart';
+import 'holiday_admin_page.dart';
 import 'package:strawberry/features/chat/chat_page.dart';
 
 /// ---------------------------------------------------------------------
@@ -212,6 +213,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => FeePaymentsAdminPage(authService: _authService),
+      ),
+    );
+  }
+
+  void _openHolidayPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HolidayAdminPage(authService: _authService),
       ),
     );
   }
@@ -1016,6 +1025,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
           icon: Icons.account_balance_wallet_rounded,
           color: _Palette.leafGreen,
           onTap: _openFeePaymentsPage,
+        ),
+        const SizedBox(height: 10),
+        _QuickActionCard(
+          title: 'Holidays',
+          subtitle: 'Configure category holidays & weekends',
+          icon: Icons.event_busy_rounded,
+          color: _Palette.violet,
+          onTap: _openHolidayPage,
         ),
         const SizedBox(height: 10),
         _QuickActionCard(
